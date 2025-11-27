@@ -3,7 +3,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
 import { Toaster } from './components/ui/sonner';
 import { toast } from 'sonner@2.0.3';
-import { LayoutDashboard, FileText, Users, File, Calendar, Database, LogOut, Menu, X, Clock } from 'lucide-react';
+import { LayoutDashboard, FileText, Users, File, Calendar, Database, LogOut, Menu, X, Clock, Settings as SettingsIcon, MessageSquare } from 'lucide-react';
 import { Button } from './components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from './components/ui/sheet';
 
@@ -17,11 +17,28 @@ import { Employees } from './pages/Employees';
 import { Templates } from './pages/Templates';
 import { LeaveManagement } from './pages/LeaveManagement';
 import { OTManagement } from './pages/OTManagement';
+import { Settings } from './pages/Settings';
+import { SystemManual } from './pages/SystemManual';
+import { InstallationGuide } from './pages/InstallationGuide';
+import { ManualInstallation } from './pages/ManualInstallation';
+import { IssueTracker } from './pages/IssueTracker';
 
 import { projectId, publicAnonKey } from './utils/supabase/info';
 
 // --- Types ---
 export type LeaveType = 'Casual' | 'Sick' | 'Annual' | 'Maternity' | 'Other';
+
+export interface IssueTicket {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  title: string;
+  description: string;
+  priority: 'Low' | 'Medium' | 'High';
+  status: 'Open' | 'Resolved';
+  createdAt: string;
+  resolvedAt?: string;
+}
 
 export interface OTRecord {
   id: string;
@@ -172,6 +189,7 @@ interface AppContextType {
   savedReports: SavedReport[];
   leaveFolders: LeaveFolder[];
   savedLeaveReports: SavedLeaveReport[];
+  issues: IssueTicket[];
   previewData: any | null;
   
   login: (emp: Employee) => void;
@@ -192,6 +210,10 @@ interface AppContextType {
   addSavedLeaveReport: (report: Omit<SavedLeaveReport, 'id'>) => void;
   deleteSavedLeaveReport: (id: string) => void;
   
+  addIssue: (issue: Omit<IssueTicket, 'id'>) => void;
+  updateIssue: (id: string, data: Partial<IssueTicket>) => void;
+  deleteIssue: (id: string) => void;
+
   getItem: (type: string, id: string) => Promise<any>; // Fetch full item data
 
   addTimesheet: (ts: TimesheetRecord) => void;
@@ -249,6 +271,7 @@ export default function App() {
   const [savedReports, setSavedReports] = useState<SavedReport[]>([]);
   const [leaveFolders, setLeaveFolders] = useState<LeaveFolder[]>([]);
   const [savedLeaveReports, setSavedLeaveReports] = useState<SavedLeaveReport[]>([]);
+  const [issues, setIssues] = useState<IssueTicket[]>([]);
   
   const [previewData, setPreviewData] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
@@ -261,7 +284,7 @@ export default function App() {
       try {
         const headers = { 'Authorization': `Bearer ${publicAnonKey}` };
         
-        const [empsRes, foldersRes, tsRes, tmplRes, sigRes, leavesRes, otRes, reportFoldersRes, savedReportsRes, leaveFoldersRes, savedLeaveRes] = await Promise.all([
+        const [empsRes, foldersRes, tsRes, tmplRes, sigRes, leavesRes, otRes, reportFoldersRes, savedReportsRes, leaveFoldersRes, savedLeaveRes, issuesRes] = await Promise.all([
           fetch(`${API_BASE}/items/employees`, { headers }),
           fetch(`${API_BASE}/items/folders`, { headers }),
           fetch(`${API_BASE}/items/timesheets`, { headers }),
@@ -272,7 +295,8 @@ export default function App() {
           fetch(`${API_BASE}/items/report_folders`, { headers }),
           fetch(`${API_BASE}/items/saved_reports`, { headers }),
           fetch(`${API_BASE}/items/leave_folders`, { headers }),
-          fetch(`${API_BASE}/items/saved_leave_reports`, { headers })
+          fetch(`${API_BASE}/items/saved_leave_reports`, { headers }),
+          fetch(`${API_BASE}/items/issues`, { headers })
         ]);
 
         if (empsRes.ok) setEmployees(await empsRes.json());
@@ -286,6 +310,7 @@ export default function App() {
         if (savedReportsRes.ok) setSavedReports(await savedReportsRes.json());
         if (leaveFoldersRes.ok) setLeaveFolders(await leaveFoldersRes.json());
         if (savedLeaveRes.ok) setSavedLeaveReports(await savedLeaveRes.json());
+        if (issuesRes.ok) setIssues(await issuesRes.json());
 
       } catch (err) {
         console.error("Failed to fetch initial data", err);
@@ -310,6 +335,7 @@ export default function App() {
   const activeSavedReports = previewData?.savedReports || savedReports;
   const activeLeaveFolders = previewData?.leaveFolders || leaveFolders;
   const activeSavedLeaveReports = previewData?.savedLeaveReports || savedLeaveReports;
+  const activeIssues = previewData?.issues || issues;
 
   // API Helpers
   const saveItem = async (type: string, item: any) => {
@@ -573,6 +599,28 @@ export default function App() {
       }
   };
 
+  const addIssue = async (issueData: Omit<IssueTicket, 'id'>) => {
+    const newIssue: IssueTicket = { ...issueData, id: Math.random().toString(36).substr(2, 9) };
+    if (await saveItem('issues', newIssue)) {
+      setIssues([...issues, newIssue]);
+    }
+  };
+
+  const updateIssue = async (id: string, data: Partial<IssueTicket>) => {
+    const issue = issues.find(i => i.id === id);
+    if (!issue) return;
+    const updated = { ...issue, ...data };
+    if (await saveItem('issues', updated)) {
+      setIssues(issues.map(i => i.id === id ? updated : i));
+    }
+  };
+
+  const deleteIssue = async (id: string) => {
+    if (await deleteItem('issues', id)) {
+      setIssues(issues.filter(i => i.id !== id));
+    }
+  };
+
 
   return (
     <AppContext.Provider value={{
@@ -588,6 +636,7 @@ export default function App() {
       savedReports: activeSavedReports,
       leaveFolders: activeLeaveFolders,
       savedLeaveReports: activeSavedLeaveReports,
+      issues: activeIssues,
       previewData,
       login,
       logout,
@@ -601,6 +650,9 @@ export default function App() {
       deleteSavedReport,
       addSavedLeaveReport,
       deleteSavedLeaveReport,
+      addIssue,
+      updateIssue,
+      deleteIssue,
       getItem,
       addTimesheet,
       updateTimesheet,
@@ -633,6 +685,11 @@ export default function App() {
               <Route path="/leaves" element={<LeaveManagement />} />
               <Route path="/overtime" element={<OTManagement />} />
               <Route path="/backups" element={<Backups />} />
+              <Route path="/settings" element={<Settings />} />
+              <Route path="/manual" element={<SystemManual />} />
+              <Route path="/installation" element={<InstallationGuide />} />
+              <Route path="/manual-installation" element={<ManualInstallation />} />
+              <Route path="/issues" element={<IssueTracker />} />
               <Route path="*" element={<Navigate to="/" />} />
             </Routes>
           </Layout>
@@ -659,12 +716,15 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       { name: 'Templates', href: '/templates', icon: File },
       { name: 'Leaves', href: '/leaves', icon: Calendar },
       { name: 'Overtime', href: '/overtime', icon: Clock },
+      { name: 'Issues', href: '/issues', icon: MessageSquare },
       { name: 'Backups', href: '/backups', icon: Database },
     ] : [
       { name: 'Template Settings', href: '/templates', icon: File },
       { name: 'My Leaves', href: '/leaves', icon: Calendar },
       { name: 'My Overtime', href: '/overtime', icon: Clock },
-    ])
+      { name: 'Issue Tracker', href: '/issues', icon: MessageSquare },
+    ]),
+    { name: 'Settings', href: '/settings', icon: SettingsIcon }
   ];
 
   return (

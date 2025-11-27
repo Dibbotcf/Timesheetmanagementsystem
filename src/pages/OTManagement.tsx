@@ -384,23 +384,37 @@ const MonthlyPersonView = ({
     otRecords,
     currentUser,
     onEditOT,
-    onDeleteOT
+    onDeleteOT,
+    onApproveOT,
+    onRejectOT,
+    onRevertOT,
+    onApproveAll
 }: {
     employees: Employee[],
     otRecords: OTRecord[],
     currentUser: any,
     onEditOT: (record: OTRecord) => void,
-    onDeleteOT: (id: string) => void
+    onDeleteOT: (id: string) => void,
+    onApproveOT: (id: string) => void,
+    onRejectOT: (id: string) => void,
+    onRevertOT: (id: string) => void,
+    onApproveAll: (records: OTRecord[]) => void
 }) => {
     const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM
+    const [selectedDate, setSelectedDate] = useState('');
     const [selectedEmpId, setSelectedEmpId] = useState<string>(currentUser.role === 'Staff' ? currentUser.id : (employees[0]?.id || ''));
 
     const filteredRecords = useMemo(() => {
-        return otRecords.filter(r => 
-            r.employeeId === selectedEmpId && 
-            r.date.startsWith(selectedMonth)
-        ).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-    }, [otRecords, selectedEmpId, selectedMonth]);
+        return otRecords.filter(r => {
+            const empMatch = selectedEmpId === 'all' ? true : r.employeeId === selectedEmpId;
+            const dateMatch = selectedDate ? r.date === selectedDate : r.date.startsWith(selectedMonth);
+            return empMatch && dateMatch;
+        }).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    }, [otRecords, selectedEmpId, selectedMonth, selectedDate]);
+
+    const pendingRecords = useMemo(() => {
+        return filteredRecords.filter(r => r.status === 'Pending');
+    }, [filteredRecords]);
 
     const totalHours = filteredRecords.reduce((acc, r) => acc + r.hours, 0);
 
@@ -412,7 +426,25 @@ const MonthlyPersonView = ({
                     <Input 
                         type="month" 
                         value={selectedMonth} 
-                        onChange={(e) => setSelectedMonth(e.target.value)}
+                        onChange={(e) => {
+                            setSelectedMonth(e.target.value);
+                            setSelectedDate(''); // Reset specific date when month changes
+                        }}
+                        className="bg-gray-50 border-0 [&::-webkit-calendar-picker-indicator]:filter-[brightness(0)_saturate(100%)] [&::-webkit-calendar-picker-indicator]:opacity-100"
+                    />
+                </div>
+                <div className="flex items-center gap-2 w-full md:w-auto">
+                    <span className="text-sm font-medium whitespace-nowrap">Or Date:</span>
+                    <Input 
+                        type="date" 
+                        value={selectedDate} 
+                        onChange={(e) => {
+                            setSelectedDate(e.target.value);
+                            if (e.target.value) {
+                                // Optional: update selectedMonth to match the date's month
+                                setSelectedMonth(e.target.value.slice(0, 7));
+                            }
+                        }}
                         className="bg-gray-50 border-0 [&::-webkit-calendar-picker-indicator]:filter-[brightness(0)_saturate(100%)] [&::-webkit-calendar-picker-indicator]:opacity-100"
                     />
                 </div>
@@ -424,6 +456,7 @@ const MonthlyPersonView = ({
                                 <SelectValue placeholder="Select Employee" />
                             </SelectTrigger>
                             <SelectContent>
+                                <SelectItem value="all">All Employees</SelectItem>
                                 {employees.map(e => (
                                     <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>
                                 ))}
@@ -431,6 +464,17 @@ const MonthlyPersonView = ({
                         </Select>
                     </div>
                 )}
+                
+                {currentUser.role !== 'Staff' && pendingRecords.length > 0 && (
+                     <Button 
+                        size="sm" 
+                        className="bg-green-600 hover:bg-green-700 text-white gap-2"
+                        onClick={() => onApproveAll(pendingRecords)}
+                     >
+                        <CheckCircle className="h-4 w-4" /> Approve All
+                     </Button>
+                )}
+
                 <div className="ml-auto bg-blue-50 text-blue-700 px-4 py-2 rounded-md font-medium">
                     Total: {totalHours.toFixed(2)} hrs
                 </div>
@@ -442,6 +486,7 @@ const MonthlyPersonView = ({
                         <TableHeader>
                             <TableRow>
                                 <TableHead>Date</TableHead>
+                                {(selectedEmpId === 'all' || currentUser.role !== 'Staff') && <TableHead>Employee</TableHead>}
                                 <TableHead>Day</TableHead>
                                 <TableHead>Time In</TableHead>
                                 <TableHead>Time Out</TableHead>
@@ -454,30 +499,48 @@ const MonthlyPersonView = ({
                         <TableBody>
                             {filteredRecords.length === 0 ? (
                                 <TableRow>
-                                    <TableCell colSpan={8} className="text-center h-32 text-gray-500">
-                                        No overtime records for this month.
+                                    <TableCell colSpan={9} className="text-center h-32 text-gray-500">
+                                        No overtime records found.
                                     </TableCell>
                                 </TableRow>
                             ) : (
                                 filteredRecords.map(r => (
                                     <TableRow key={r.id}>
                                         <TableCell className="font-medium">{format(parseISO(r.date), 'dd MMM yyyy')}</TableCell>
+                                        {(selectedEmpId === 'all' || currentUser.role !== 'Staff') && <TableCell className="font-medium">{r.employeeName || 'Unknown'}</TableCell>}
                                         <TableCell className="text-gray-500">{format(parseISO(r.date), 'EEEE')}</TableCell>
                                         <TableCell>{r.startTime}</TableCell>
                                         <TableCell>{r.endTime}</TableCell>
                                         <TableCell className="font-bold">{r.hours.toFixed(2)}</TableCell>
                                         <TableCell className="max-w-[200px] truncate">{r.reason}</TableCell>
                                         <TableCell>
-                                            <Badge variant={r.status === 'Approved' ? 'default' : r.status === 'Rejected' ? 'destructive' : 'secondary'}>
+                                            <Badge variant={r.status === 'Approved' ? 'default' : r.status === 'Rejected' ? 'destructive' : 'secondary'} className={r.status === 'Pending' ? 'bg-yellow-100 text-yellow-800 hover:bg-yellow-200' : ''}>
                                                 {r.status}
                                             </Badge>
                                         </TableCell>
                                         <TableCell className="text-right">
-                                            {/* Staff cannot delete their own records here based on requirements */}
+                                            {/* Actions for Admin/HR */}
                                             {currentUser.role !== 'Staff' && (
-                                                <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500" onClick={() => onDeleteOT(r.id)}>
-                                                    <Trash2 className="h-4 w-4" />
-                                                </Button>
+                                                <div className="flex justify-end items-center gap-1">
+                                                    {r.status === 'Pending' && (
+                                                        <>
+                                                            <Button variant="ghost" size="icon" className="h-8 w-8 text-green-600" onClick={() => onApproveOT(r.id)} title="Approve">
+                                                                <CheckCircle className="h-4 w-4" />
+                                                            </Button>
+                                                            <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500" onClick={() => onRejectOT(r.id)} title="Reject">
+                                                                <XCircle className="h-4 w-4" />
+                                                            </Button>
+                                                        </>
+                                                    )}
+                                                    {r.status !== 'Pending' && (
+                                                        <Button variant="ghost" size="icon" className="h-8 w-8 text-gray-500" onClick={() => onRevertOT(r.id)} title="Revert to Pending">
+                                                            <Clock className="h-4 w-4" />
+                                                        </Button>
+                                                    )}
+                                                    <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500" onClick={() => onDeleteOT(r.id)} title="Delete">
+                                                        <Trash2 className="h-4 w-4" />
+                                                    </Button>
+                                                </div>
                                             )}
                                         </TableCell>
                                     </TableRow>
@@ -900,6 +963,30 @@ export const OTManagement: React.FC = () => {
       setIsAddOpen(true);
   };
 
+  const handleApproveAll = (records: OTRecord[]) => {
+    if (window.confirm(`Are you sure you want to approve ${records.length} pending OT records?`)) {
+        records.forEach(r => {
+            updateOTRecord(r.id, { status: 'Approved' });
+        });
+        toast.success(`Approved ${records.length} records successfully`);
+    }
+  };
+
+  const handleApprove = (id: string) => {
+    updateOTRecord(id, { status: 'Approved' });
+    toast.success("Record approved");
+  };
+
+  const handleReject = (id: string) => {
+    updateOTRecord(id, { status: 'Rejected' });
+    toast.success("Record rejected");
+  };
+
+  const handleRevert = (id: string) => {
+    updateOTRecord(id, { status: 'Pending' });
+    toast.success("Record reverted to pending");
+  };
+
   return (
     <div className="space-y-6 max-w-6xl mx-auto pb-20">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 print:hidden">
@@ -950,6 +1037,10 @@ export const OTManagement: React.FC = () => {
                         currentUser={currentUser}
                         onEditOT={(r) => { /* To be implemented if needed */ }}
                         onDeleteOT={(id) => deleteOTRecord(id)}
+                        onApproveOT={handleApprove}
+                        onRejectOT={handleReject}
+                        onRevertOT={handleRevert}
+                        onApproveAll={handleApproveAll}
                     />
                 </TabsContent>
                 {!isStaff && (
