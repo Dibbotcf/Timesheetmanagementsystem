@@ -1,0 +1,315 @@
+{
+  "folders:st6ewihup": {
+    "id": "st6ewihup",
+    "name": "SS"
+  },
+  "employees:wpm9s9se9": {
+    "status": "Active",
+    "role": "Admin/HR",
+    "name": "Dibbo",
+    "eid": "03",
+    "dob": "2000-12-17",
+    "joiningDate": "2025-12-11",
+    "gender": "Male",
+    "id": "wpm9s9se9"
+  },
+  "timesheets:w3gu1jz97": {
+    "id": "w3gu1jz97",
+    "folderId": "st6ewihup",
+    "employeeId": "wpm9s9se9",
+    "employeeName": "Dibbo",
+    "eid": "03",
+    "year": 2025,
+    "month": 11,
+    "entries": [
+      {
+        "date": 1,
+        "inTime": "8.30",
+        "outTime": "5.40",
+        "ot": "",
+        "remarks": "fd"
+      },
+      {
+        "date": 2,
+        "inTime": "",
+        "outTime": "",
+        "ot": "",
+        "remarks": ""
+      },
+      {
+        "date": 3,
+        "inTime": "",
+        "outTime": "",
+        "ot": "",
+        "remarks": ""
+      },
+      {
+        "date": 4,
+        "inTime": "",
+        "outTime": "",
+        "ot": "",
+        "remarks": ""
+      },
+      {
+        "date": 5,
+        "inTime": "",
+        "outTime": "",
+        "ot": "",
+        "remarks": ""
+      },
+      {
+        "date": 6,
+        "inTime": "",
+        "outTime": "",
+        "ot": "",
+        "remarks": ""
+      },
+      {
+        "date": 7,
+        "inTime": "",
+        "outTime": "",
+        "ot": "",
+        "remarks": ""
+      },
+      {
+        "date": 8,
+        "inTime": "",
+        "outTime": "",
+        "ot": "",
+        "remarks": ""
+      },
+      {
+        "date": 9,
+        "inTime": "",
+        "outTime": "",
+        "ot": "",
+        "remarks": ""
+      },
+      {
+        "date": 10,
+        "inTime": "",
+        "outTime": "",
+        "ot": "",
+        "remarks": ""
+      },
+      {
+        "date": 11,
+        "inTime": "",
+        "outTime": "",
+        "ot": "",
+        "remarks": ""
+      },
+      {
+        "date": 12,
+        "inTime": "",
+        "outTime": "",
+        "ot": "",
+        "remarks": ""
+      },
+      {
+        "date": 13,
+        "inTime": "",
+        "outTime": "",
+        "ot": "",
+        "remarks": ""
+      },
+      {
+        "date": 14,
+        "inTime": "",
+        "outTime": "",
+        "ot": "",
+        "remarks": ""
+      },
+      {
+        "date": 15,
+        "inTime": "",
+        "outTime": "",
+        "ot": "",
+        "remarks": ""
+      },
+      {
+        "date": 16,
+        "inTime": "",
+        "outTime": "",
+        "ot": "",
+        "remarks": ""
+      },
+      {
+        "date": 17,
+        "inTime": "",
+        "outTime": "",
+        "ot": "",
+        "remarks": ""
+      },
+      {
+        "date": 18,
+        "inTime": "",
+        "outTime": "",
+        "ot": "",
+        "remarks": ""
+      },
+      {
+        "date": 19,
+        "inTime": "",
+        "outTime": "",
+        "ot": "",
+        "remarks": ""
+      },
+      {
+        "date": 20,
+        "inTime": "",
+        "outTime": "",
+        "ot": "",
+        "remarks": ""
+      },
+      {
+        "date": 21,
+        "inTime": "",
+        "outTime": "",
+        "ot": "",
+        "remarks": ""
+      },
+      {
+        "date": 22,
+        "inTime": "",
+        "outTime": "",
+        "ot": "",
+        "remarks": ""
+      },
+      {
+        "date": 23,
+        "inTime": "",
+        "outTime": "",
+        "ot": "",
+        "remarks": ""
+      },
+      {
+        "date": 24,
+        "inTime": "",
+        "outTime": "",
+        "ot": "",
+        "remarks": ""
+      },
+      {
+        "date": 25,
+        "inTime": "",
+        "outTime": "",
+        "ot": "",
+        "remarks": ""
+      },
+      {
+        "date": 26,
+        "inTime": "",
+        "outTime": "",
+        "ot": "",
+        "remarks": ""
+      },
+      {
+        "date": 27,
+        "inTime": "",
+        "outTime": "",
+        "ot": "",
+        "remarks": ""
+      },
+      {
+        "date": 28,
+        "inTime": "",
+        "outTime": "",
+        "ot": "",
+        "remarks": ""
+      },
+      {
+        "date": 29,
+        "inTime": "",
+        "outTime": "",
+        "ot": "",
+        "remarks": ""
+      },
+      {
+        "date": 30,
+        "inTime": "",
+        "outTime": "",
+        "ot": "",
+        "remarks": ""
+      },
+      {
+        "date": 31,
+        "inTime": "",
+        "outTime": "",
+        "ot": "",
+        "remarks": ""
+      }
+    ],
+    "summary": [
+      {
+        "sl": "01",
+        "days": "",
+        "remarks": ""
+      },
+      {
+        "sl": "02",
+        "days": "",
+        "remarks": ""
+      },
+      {
+        "sl": "03",
+        "days": "",
+        "remarks": ""
+      },
+      {
+        "sl": "04",
+        "days": "",
+        "remarks": ""
+      },
+      {
+        "sl": "05",
+        "days": "",
+        "remarks": ""
+      },
+      {
+        "sl": "06",
+        "days": "",
+        "remarks": ""
+      },
+      {
+        "sl": "07",
+        "days": "",
+        "remarks": ""
+      },
+      {
+        "sl": "08",
+        "days": "",
+        "remarks": ""
+      }
+    ],
+    "submissions": [
+      {
+        "timestamp": "2025-12-17T08:53:12.107Z"
+      },
+      {
+        "timestamp": "2025-12-17T08:58:30.639Z"
+      }
+    ]
+  },
+  "ot_records:6i8hqc9mo": {
+    "employeeId": "wpm9s9se9",
+    "employeeName": "Dibbo",
+    "date": "2025-12-17",
+    "startTime": "13:02",
+    "endTime": "15:03",
+    "hours": 2.02,
+    "reason": "ef",
+    "status": "Pending",
+    "id": "6i8hqc9mo"
+  },
+  "issues:ctkxxb0ph": {
+    "employeeId": "wpm9s9se9",
+    "employeeName": "Dibbo",
+    "title": "sd",
+    "description": "sf",
+    "priority": "Medium",
+    "status": "Open",
+    "createdAt": "2025-12-17T09:01:54.846Z",
+    "id": "ctkxxb0ph"
+  }
+}
