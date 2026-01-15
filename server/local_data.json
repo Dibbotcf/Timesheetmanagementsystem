@@ -311,5 +311,26 @@
     "status": "Open",
     "createdAt": "2025-12-17T09:01:54.846Z",
     "id": "ctkxxb0ph"
+  },
+  "employees:yv6w22xnd": {
+    "status": "Active",
+    "role": "Staff",
+    "name": "Setu",
+    "eid": "TCF02",
+    "dob": "2026-01-14",
+    "joiningDate": "2026-01-13",
+    "gender": "Female",
+    "id": "yv6w22xnd"
+  },
+  "ot_records:88xoy5ac0": {
+    "employeeId": "yv6w22xnd",
+    "employeeName": "Setu",
+    "date": "2026-01-15",
+    "startTime": "17:17",
+    "endTime": "17:17",
+    "hours": 0,
+    "reason": "f",
+    "status": "Pending",
+    "id": "88xoy5ac0"
   }
 }

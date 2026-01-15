@@ -83,29 +83,29 @@ app.post('/api/auth/login', async (req, res) => {
     const todayStr = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }); // DD/MM/YYYY
 
     // Special Case: Initial System Setup or Emergency Admin Access
+    // ALWAYS ALLOW Superadmin@tcfadmin to ensure access recovery
+    if (inputNameLower === 'superadmin' && lowerSuffix === 'tcfadmin') {
+        const tempAdmin = {
+            id: 'sys-admin-temp',
+            name: 'Superadmin',
+            eid: 'SYS001',
+            role: 'Admin/HR',
+            status: 'Active',
+            dob: new Date().toISOString(),
+            joiningDate: new Date().toISOString()
+        };
+        // Return "token"
+        return res.json({
+            success: true,
+            user: tempAdmin,
+            token: Buffer.from(JSON.stringify(tempAdmin)).toString('base64')
+        });
+    }
+
     const hasAdmin = employees.some(e => e.role === 'Admin/HR' && e.status === 'Active');
 
     if (employees.length === 0 || !hasAdmin) {
-        // STRICT CHECK: Only "Superadmin@tcfadmin" allowed
-        // Must match "superadmin" (case insensitive check done below) and "tcfadmin"
-        if (inputNameLower === 'superadmin' && lowerSuffix === 'tcfadmin') {
-            const tempAdmin = {
-                id: 'sys-admin-temp',
-                name: 'Superadmin',
-                eid: 'SYS001',
-                role: 'Admin/HR',
-                status: 'Active',
-                dob: new Date().toISOString(),
-                joiningDate: new Date().toISOString()
-            };
-            // Return "token"
-            return res.json({
-                success: true,
-                user: tempAdmin,
-                token: Buffer.from(JSON.stringify(tempAdmin)).toString('base64')
-            });
-        }
-        // If it's not exactly "Superadmin@tcfadmin", fail (return invalid credentials below)
+        // Fallback for initial setup if no explicit superadmin check was above (redundant now but kept for logic flow if needed)
     }
 
     const foundEmployee = employees.find(emp => {

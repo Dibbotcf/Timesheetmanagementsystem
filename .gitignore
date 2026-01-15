@@ -12,3 +12,5 @@ coverage
 *.njsproj
 *.sln
 *.swp
+
+*.zip
