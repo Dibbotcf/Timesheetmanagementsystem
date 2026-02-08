@@ -2,7 +2,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
 import { Toaster } from './components/ui/sonner';
-import { toast } from 'sonner@2.0.3';
+import { toast } from 'sonner';
 import { LayoutDashboard, FileText, Users, File, Calendar, Database, LogOut, Menu, X, Clock, Settings as SettingsIcon, MessageSquare } from 'lucide-react';
 import { Button } from './components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from './components/ui/sheet';
@@ -23,7 +23,8 @@ import { InstallationGuide } from './pages/InstallationGuide';
 
 import { IssueTracker } from './pages/IssueTracker';
 
-// import { projectId, publicAnonKey } from './utils/supabase/info'; // Removed for cPanel migration
+// Backend API is now PHP/MySQL
+
 
 // --- Types ---
 export type LeaveType = 'Casual' | 'Sick' | 'Annual' | 'Maternity' | 'Other';
