@@ -35,7 +35,7 @@ export const IssueTracker: React.FC = () => {
     .filter(issue => {
       // Staff sees only their issues, Admin sees all
       if (!isAdmin && issue.employeeId !== currentUser?.id) return false;
-      
+
       // Status Filter
       if (filterStatus !== 'All' && issue.status !== filterStatus) return false;
 
@@ -85,8 +85,8 @@ export const IssueTracker: React.FC = () => {
 
   const handleDelete = (id: string) => {
     if (window.confirm("Are you sure you want to delete this issue? This action cannot be undone.")) {
-        deleteIssue(id);
-        toast.success("Issue deleted successfully");
+      deleteIssue(id);
+      toast.success("Issue deleted successfully");
     }
   };
 
@@ -108,7 +108,7 @@ export const IssueTracker: React.FC = () => {
             {isAdmin ? 'Manage and resolve reported system issues.' : 'Report technical issues or request assistance.'}
           </p>
         </div>
-        
+
         {!isAdmin && (
           <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
             <DialogTrigger asChild>
@@ -126,17 +126,17 @@ export const IssueTracker: React.FC = () => {
               <div className="space-y-4 py-4">
                 <div className="space-y-2">
                   <label className="text-sm font-medium">Issue Title</label>
-                  <Input 
-                    placeholder="e.g. Cannot access timesheet" 
+                  <Input
+                    placeholder="e.g. Cannot access timesheet"
                     value={newIssue.title}
-                    onChange={(e) => setNewIssue({...newIssue, title: e.target.value})}
+                    onChange={(e) => setNewIssue({ ...newIssue, title: e.target.value })}
                   />
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium">Priority</label>
-                  <Select 
-                    value={newIssue.priority} 
-                    onValueChange={(v: 'Low' | 'Medium' | 'High') => setNewIssue({...newIssue, priority: v})}
+                  <Select
+                    value={newIssue.priority}
+                    onValueChange={(v: 'Low' | 'Medium' | 'High') => setNewIssue({ ...newIssue, priority: v })}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Select priority" />
@@ -150,11 +150,11 @@ export const IssueTracker: React.FC = () => {
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium">Description</label>
-                  <Textarea 
-                    placeholder="Please provide details..." 
+                  <Textarea
+                    placeholder="Please provide details..."
                     className="min-h-[100px]"
                     value={newIssue.description}
-                    onChange={(e) => setNewIssue({...newIssue, description: e.target.value})}
+                    onChange={(e) => setNewIssue({ ...newIssue, description: e.target.value })}
                   />
                 </div>
               </div>
@@ -172,17 +172,17 @@ export const IssueTracker: React.FC = () => {
         <CardContent className="p-4 flex flex-col sm:flex-row gap-4">
           <div className="relative flex-1">
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input 
-              placeholder="Search issues..." 
-              className="pl-9" 
+            <Input
+              placeholder="Search issues..."
+              className="pl-9"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
           <div className="flex items-center gap-2 w-full sm:w-auto">
             <Filter className="h-4 w-4 text-muted-foreground" />
-            <Select 
-              value={filterStatus} 
+            <Select
+              value={filterStatus}
               onValueChange={(v: 'All' | 'Open' | 'Resolved') => setFilterStatus(v)}
             >
               <SelectTrigger className="w-[180px]">
@@ -235,53 +235,53 @@ export const IssueTracker: React.FC = () => {
                       Reported by <span className="font-medium text-gray-900">{issue.employeeName}</span>
                     </CardDescription>
                   </div>
-                  
+
                   {isAdmin && (
                     <div className="flex flex-col gap-2 shrink-0 items-end">
-                        {issue.status === 'Open' && (
-                            <Button 
-                            size="sm" 
-                            className="bg-green-600 hover:bg-green-700 text-white gap-2 w-full md:w-auto"
-                            onClick={() => handleResolve(issue.id)}
-                            >
-                            <CheckCircle className="h-4 w-4" /> Mark Resolved
-                            </Button>
-                        )}
-                        <Button 
-                            size="sm" 
-                            variant="destructive"
-                            className="gap-2 w-full md:w-auto"
-                            onClick={() => handleDelete(issue.id)}
+                      {issue.status === 'Open' && (
+                        <Button
+                          size="sm"
+                          className="bg-green-600 hover:bg-green-700 text-white gap-2 w-full md:w-auto"
+                          onClick={() => handleResolve(issue.id)}
                         >
-                            <Trash2 className="h-4 w-4" /> Delete
+                          <CheckCircle className="h-4 w-4" /> Mark Resolved
                         </Button>
+                      )}
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        className="gap-2 w-full md:w-auto"
+                        onClick={() => handleDelete(issue.id)}
+                      >
+                        <Trash2 className="h-4 w-4" /> Delete
+                      </Button>
                     </div>
                   )}
-                  
+
                   {!isAdmin && issue.status === 'Resolved' && (
                     <div className="flex flex-col items-end">
-                        <div className="flex items-center text-green-600 text-sm font-medium gap-1 bg-green-50 px-2 py-1 rounded border border-green-100">
-                            <CheckCircle className="h-3 w-3" /> Resolved
-                        </div>
-                        {issue.resolvedAt && (
-                            <span className="text-xs text-muted-foreground mt-1">
-                                {format(new Date(issue.resolvedAt), 'MMM dd, HH:mm')}
-                            </span>
-                        )}
+                      <div className="flex items-center text-green-600 text-sm font-medium gap-1 bg-green-50 px-2 py-1 rounded border border-green-100">
+                        <CheckCircle className="h-3 w-3" /> Resolved
+                      </div>
+                      {issue.resolvedAt && (
+                        <span className="text-xs text-muted-foreground mt-1">
+                          {format(new Date(issue.resolvedAt), 'MMM dd, HH:mm')}
+                        </span>
+                      )}
                     </div>
                   )}
 
                   {isAdmin && issue.status === 'Resolved' && (
-                      <div className="flex flex-col items-end mb-2">
-                          <div className="flex items-center text-green-600 text-sm font-medium gap-1 bg-green-50 px-2 py-1 rounded border border-green-100">
-                              <CheckCircle className="h-3 w-3" /> Resolved
-                          </div>
-                          {issue.resolvedAt && (
-                              <span className="text-xs text-muted-foreground mt-1">
-                                  {format(new Date(issue.resolvedAt), 'MMM dd, HH:mm')}
-                              </span>
-                          )}
+                    <div className="flex flex-col items-end mb-2">
+                      <div className="flex items-center text-green-600 text-sm font-medium gap-1 bg-green-50 px-2 py-1 rounded border border-green-100">
+                        <CheckCircle className="h-3 w-3" /> Resolved
                       </div>
+                      {issue.resolvedAt && (
+                        <span className="text-xs text-muted-foreground mt-1">
+                          {format(new Date(issue.resolvedAt), 'MMM dd, HH:mm')}
+                        </span>
+                      )}
+                    </div>
                   )}
                 </div>
               </CardHeader>
