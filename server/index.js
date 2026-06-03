@@ -3,7 +3,18 @@ const cors = require('cors');
 const { get, set, del, getByPrefix } = require('./db');
 require('dotenv').config();
 
+const http = require('http');
+const { Server } = require('socket.io');
+
 const app = express();
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: '*',
+    methods: ['GET', 'POST', 'DELETE', 'PUT']
+  }
+});
+
 const PORT = process.env.PORT || 3001;
 const fs = require('fs'); // Explicit require if needed
 const path = require('path');
@@ -188,6 +199,7 @@ app.post('/api/items/:type', async (req, res) => {
 
     try {
         await set(`${type}:${id}`, body);
+        io.emit('data_updated', { type, item: body });
         res.json({ success: true, data: body });
     } catch (err) {
         console.error(err);
@@ -199,6 +211,7 @@ app.delete('/api/items/:type/:id', async (req, res) => {
     const { type, id } = req.params;
     try {
         await del(`${type}:${id}`);
+        io.emit('data_deleted', { type, id });
         res.json({ success: true });
     } catch (err) {
         console.error(err);
@@ -281,6 +294,7 @@ app.post('/api/backups', async (req, res) => {
             [filename, JSON.stringify(backupContent)]
         );
 
+        io.emit('data_updated', { type: 'backups', item: { name: filename, metadata: { size: JSON.stringify(backupContent).length } } });
         res.json({ success: true, filename });
 
     } catch (err) {
@@ -311,6 +325,7 @@ app.delete('/api/backups', async (req, res) => {
 
     try {
         await require('./db').pool.query('DELETE FROM backups WHERE name = ?', [path]);
+        io.emit('data_deleted', { type: 'backups', id: path });
         res.json({ success: true });
     } catch (err) {
         console.error(err);
@@ -346,6 +361,7 @@ app.post('/api/restore', async (req, res) => {
         }
 
         await connection.commit();
+        io.emit('refresh_all');
         res.json({ success: true });
     } catch (err) {
         await connection.rollback();
@@ -356,6 +372,6 @@ app.post('/api/restore', async (req, res) => {
     }
 });
 
-app.listen(PORT, () => {
+server.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
 });

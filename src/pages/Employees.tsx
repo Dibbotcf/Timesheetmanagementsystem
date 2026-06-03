@@ -65,10 +65,21 @@ export const Employees: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // --- Employee Logic ---
-  const filteredEmployees = employees.filter(e => 
+  const filteredEmployees = [...employees].filter(e => 
     e.name.toLowerCase().includes(search.toLowerCase()) || 
     e.eid.toLowerCase().includes(search.toLowerCase())
-  );
+  ).sort((a, b) => {
+    const eIdA = a.eid || '';
+    const eIdB = b.eid || '';
+    const parseEidNumber = (eid: string): number => {
+        const match = eid.match(/\d+/);
+        return match ? parseInt(match[0], 10) : Infinity;
+    };
+    const aNum = parseEidNumber(eIdA);
+    const bNum = parseEidNumber(eIdB);
+    if (aNum !== bNum) return aNum - bNum;
+    return eIdA.localeCompare(eIdB);
+  });
 
   const resetForm = () => {
     setFormData({ status: 'Active', role: 'Staff' });

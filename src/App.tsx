@@ -3,9 +3,10 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
 import { Toaster } from './components/ui/sonner';
 import { toast } from 'sonner';
-import { LayoutDashboard, FileText, Users, File, Calendar, Database, LogOut, Menu, X, Clock, Settings as SettingsIcon, MessageSquare } from 'lucide-react';
+import { LayoutDashboard, FileText, Users, File, Calendar, Database, LogOut, Menu, X, Clock, Settings as SettingsIcon, MessageSquare, ClipboardList, CalendarDays, BookOpen } from 'lucide-react';
 import { Button } from './components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from './components/ui/sheet';
+import { io } from 'socket.io-client';
 
 // Pages
 import { Dashboard } from './pages/Dashboard';
@@ -22,6 +23,11 @@ import { SystemManual } from './pages/SystemManual';
 import { InstallationGuide } from './pages/InstallationGuide';
 
 import { IssueTracker } from './pages/IssueTracker';
+import { Attendance } from './pages/Attendance';
+import { Reports } from './pages/Reports';
+import { Policy } from './pages/Policy';
+import { parseToTimeInputVal, formatDisplayTime } from './components/PrintableTimesheet';
+
 
 // Backend API is now PHP/MySQL
 
@@ -51,6 +57,7 @@ export interface OTRecord {
   hours: number;
   reason: string;
   status: 'Pending' | 'Approved' | 'Rejected';
+  submittedAt?: string;
 }
 
 export interface ReportFolder {
@@ -106,6 +113,7 @@ export interface Employee {
 export interface Folder {
   id: string;
   name: string;
+  isHidden?: boolean;
 }
 
 export interface TimesheetRecord {
@@ -122,6 +130,8 @@ export interface TimesheetRecord {
   checkedBySignatureId?: string;
   approvedBySignatureId?: string;
   submissions?: SubmissionHistory[];
+  defaultClockIn?: string;   // e.g. "08:30"
+  defaultClockOut?: string;  // e.g. "17:30"
 }
 
 export interface DailyEntry {
@@ -129,8 +139,12 @@ export interface DailyEntry {
   inTime: string;
   outTime: string;
   ot: string;
+  late?: string;
   remarks: string;
   signatureId?: string;
+  signedAt?: string;      // ISO date string — set when Admin/HR assigns a signature
+  manualLate?: boolean;
+  isLeaveOverride?: boolean;
 }
 
 export interface SummaryEntry {
@@ -172,10 +186,24 @@ export interface LeaveRecord {
   type: LeaveType;
   reason: string;
   days: number;
+  partialHours?: number;
   status: 'Pending' | 'Approved' | 'Rejected';
 }
 
 export type LeaveRequest = Omit<LeaveRecord, 'id'>;
+
+export interface AttendanceRecord {
+  id: string; // `${employeeId}-${year}-${month}`
+  employeeId: string;
+  year: number;
+  month: number;
+  statusMap: Record<number, 'Holiday' | 'DayOff' | 'Present' | 'HalfDay' | 'Late' | 'Absent' | 'OnLeave'>;
+  entryDetails?: Record<number, {
+    clockIn?: string;
+    clockOut?: string;
+    lateMinutes?: number;
+  }>;
+}
 
 interface AppContextType {
   currentUser: Employee | null;
@@ -191,12 +219,14 @@ interface AppContextType {
   leaveFolders: LeaveFolder[];
   savedLeaveReports: SavedLeaveReport[];
   issues: IssueTicket[];
+  attendanceRecords: AttendanceRecord[];
   previewData: any | null;
 
   login: (emp: Employee) => void;
   logout: () => void;
 
   addFolder: (name: string) => void;
+  updateFolder: (id: string, data: Partial<Folder>) => void;
   deleteFolder: (id: string) => void;
 
   addReportFolder: (name: string) => Promise<string | null>; // Returns ID if successful
@@ -234,6 +264,7 @@ interface AppContextType {
   deleteSignature: (id: string) => void;
 
   addLeave: (leave: LeaveRequest) => void;
+  updateLeave: (id: string, data: Partial<LeaveRecord>) => void;
   deleteLeave: (id: string) => void;
 
   addOTRecord: (ot: Omit<OTRecord, 'id'>) => void;
@@ -242,6 +273,7 @@ interface AppContextType {
 
   enablePreview: (data: any) => void;
   disablePreview: () => void;
+  saveAttendanceRecord: (record: AttendanceRecord) => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -274,6 +306,7 @@ export default function App() {
   const [leaveFolders, setLeaveFolders] = useState<LeaveFolder[]>([]);
   const [savedLeaveReports, setSavedLeaveReports] = useState<SavedLeaveReport[]>([]);
   const [issues, setIssues] = useState<IssueTicket[]>([]);
+  const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
 
   const [previewData, setPreviewData] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
@@ -290,7 +323,7 @@ export default function App() {
           'Content-Type': 'application/json'
         };
 
-        const [empsRes, foldersRes, tsRes, tmplRes, sigRes, leavesRes, otRes, reportFoldersRes, savedReportsRes, leaveFoldersRes, savedLeaveRes, issuesRes] = await Promise.all([
+        const [empsRes, foldersRes, tsRes, tmplRes, sigRes, leavesRes, otRes, reportFoldersRes, savedReportsRes, leaveFoldersRes, savedLeaveRes, issuesRes, attendanceRes] = await Promise.all([
           fetch(`${API_BASE}/items/employees`, { headers }),
           fetch(`${API_BASE}/items/folders`, { headers }),
           fetch(`${API_BASE}/items/timesheets`, { headers }),
@@ -302,7 +335,8 @@ export default function App() {
           fetch(`${API_BASE}/items/saved_reports`, { headers }),
           fetch(`${API_BASE}/items/leave_folders`, { headers }),
           fetch(`${API_BASE}/items/saved_leave_reports`, { headers }),
-          fetch(`${API_BASE}/items/issues`, { headers })
+          fetch(`${API_BASE}/items/issues`, { headers }),
+          fetch(`${API_BASE}/items/attendance`, { headers })
         ]);
 
         if (empsRes.ok) setEmployees(await empsRes.json());
@@ -317,6 +351,7 @@ export default function App() {
         if (leaveFoldersRes.ok) setLeaveFolders(await leaveFoldersRes.json());
         if (savedLeaveRes.ok) setSavedLeaveReports(await savedLeaveRes.json());
         if (issuesRes.ok) setIssues(await issuesRes.json());
+        if (attendanceRes.ok) setAttendanceRecords(await attendanceRes.json());
 
       } catch (err) {
         console.error("Failed to fetch initial data", err);
@@ -327,6 +362,59 @@ export default function App() {
     };
 
     fetchData();
+  }, [previewData]);
+
+  // Real-time Socket Synchronization
+  useEffect(() => {
+    if (previewData) return;
+    const SOCKET_URL = API_BASE.replace('/api', '');
+    const socket = io(SOCKET_URL);
+
+    const typeToSetStateMap: Record<string, React.Dispatch<React.SetStateAction<any[]>>> = {
+      'employees': setEmployees,
+      'folders': setFolders,
+      'timesheets': setTimesheets,
+      'templates': setTemplates,
+      'signatures': setSignatures,
+      'leaves': setLeaves,
+      'ot_records': setOtRecords,
+      'report_folders': setReportFolders,
+      'saved_reports': setSavedReports,
+      'leave_folders': setLeaveFolders,
+      'saved_leave_reports': setSavedLeaveReports,
+      'issues': setIssues,
+      'attendance': setAttendanceRecords
+    };
+
+    socket.on('data_updated', ({ type, item }) => {
+       const setter = typeToSetStateMap[type];
+       if (setter) {
+          setter(prev => {
+             const index = prev.findIndex(t => t.id === item.id);
+             if (index >= 0) {
+               const newArr = [...prev];
+               newArr[index] = item;
+               return newArr;
+             }
+             return [...prev, item];
+          });
+       }
+    });
+
+    socket.on('data_deleted', ({ type, id }) => {
+       const setter = typeToSetStateMap[type];
+       if (setter) {
+          setter(prev => prev.filter(t => t.id !== id));
+       }
+    });
+
+    socket.on('refresh_all', () => {
+       window.location.reload();
+    });
+
+    return () => {
+      socket.disconnect();
+    };
   }, [previewData]);
 
   // Override state if previewData is set
@@ -401,9 +489,21 @@ export default function App() {
   };
 
   const addFolder = async (name: string) => {
-    const newFolder: Folder = { id: Math.random().toString(36).substr(2, 9), name };
+    const newFolder: Folder = {
+      id: Math.random().toString(36).substr(2, 9),
+      name
+    };
     if (await saveItem('folders', newFolder)) {
-      setFolders([...folders, newFolder]);
+      setFolders(prev => [...prev, newFolder]);
+    }
+  };
+
+  const updateFolder = async (id: string, data: Partial<Folder>) => {
+    const existing = folders.find(f => f.id === id);
+    if (!existing) return;
+    const updated = { ...existing, ...data };
+    if (await saveItem('folders', updated)) {
+      setFolders(prev => prev.map(f => f.id === id ? updated : f));
     }
   };
 
@@ -513,6 +613,85 @@ export default function App() {
     const updated = { ...ts, ...data };
     if (await saveItem('timesheets', updated)) {
       setTimesheets(timesheets.map(t => t.id === id ? updated : t));
+
+      // Sync to Attendance Record
+      if (data.entries) {
+        const recId = `${ts.employeeId}-${ts.year}-${ts.month}`;
+        
+        // Find existing attendance record or initialize a new one
+        const existingRecord = attendanceRecords.find(r => r.id === recId);
+        const statusMap = existingRecord ? { ...existingRecord.statusMap } : {};
+        const entryDetails = existingRecord?.entryDetails ? { ...existingRecord.entryDetails } : {};
+        
+        // Loop over the daily entries from the timesheet
+        for (const entry of data.entries) {
+          const inT = entry.inTime ? entry.inTime.trim() : '';
+          const outT = entry.outTime ? entry.outTime.trim() : '';
+          
+          if (inT) {
+            // Convert to HH:mm format to calculate late minutes
+            const parsedIn = parseToTimeInputVal(inT);
+            let late = 0;
+            
+            // Check if this day is a partial leave
+            let isPartialLeave = false;
+            if (leaves) {
+              const MS = 24 * 60 * 60 * 1000;
+              for (const leave of leaves) {
+                if (leave.employeeId !== ts.employeeId || leave.status !== 'Approved') continue;
+                const startT = new Date(leave.startDate).getTime();
+                const endT   = new Date(leave.endDate).getTime();
+                const checkT = new Date(ts.year, ts.month, entry.date).getTime();
+                // Ensure dates match cleanly avoiding timezone shifts
+                if (checkT >= startT - MS/2 && checkT <= endT + MS/2) {
+                  const isHourly = !!leave.partialHours && leave.partialHours > 0;
+                  if (leave.days < 1 || isHourly) {
+                    isPartialLeave = true;
+                    break;
+                  }
+                }
+              }
+            }
+            
+            if (entry.late !== undefined && entry.late !== '') {
+              const parsedLate = parseInt(entry.late as string, 10);
+              if (!isNaN(parsedLate)) {
+                late = parsedLate;
+              }
+            } else if (parsedIn && !isPartialLeave) {
+              const [hours, minutes] = parsedIn.split(':').map(Number);
+              if (!isNaN(hours) && !isNaN(minutes)) {
+                const totalMinutes = hours * 60 + minutes;
+                const limitMinutes = 8 * 60 + 30; // 8:30 AM
+                late = totalMinutes > limitMinutes ? totalMinutes - limitMinutes : 0;
+              }
+            }
+            
+            const status = late > 0 ? 'Late' : 'Present';
+            statusMap[entry.date] = status as any;
+            entryDetails[entry.date] = {
+              clockIn: formatDisplayTime(inT),
+              clockOut: outT ? formatDisplayTime(outT) : '',
+              lateMinutes: late
+            };
+          } else {
+            // If empty, clear explicit attendance for this day
+            delete statusMap[entry.date];
+            delete entryDetails[entry.date];
+          }
+        }
+        
+        const newRecord: AttendanceRecord = {
+          id: recId,
+          employeeId: ts.employeeId,
+          year: ts.year,
+          month: ts.month,
+          statusMap,
+          entryDetails
+        };
+        
+        await saveAttendanceRecord(newRecord);
+      }
     }
   };
 
@@ -589,6 +768,15 @@ export default function App() {
     }
   };
 
+  const updateLeave = async (id: string, data: Partial<LeaveRecord>) => {
+    const leave = leaves.find(l => l.id === id);
+    if (!leave) return;
+    const updated = { ...leave, ...data };
+    if (await saveItem('leaves', updated)) {
+      setLeaves(leaves.map(l => l.id === id ? updated : l));
+    }
+  };
+
   const addOTRecord = async (otData: Omit<OTRecord, 'id'>) => {
     const newOt: OTRecord = { ...otData, id: Math.random().toString(36).substr(2, 9) };
     if (await saveItem('ot_records', newOt)) {
@@ -633,6 +821,19 @@ export default function App() {
     }
   };
 
+  const saveAttendanceRecord = async (record: AttendanceRecord) => {
+    if (await saveItem('attendance', record)) {
+      setAttendanceRecords(prev => {
+        const exists = prev.find(r => r.id === record.id);
+        if (exists) {
+          return prev.map(r => r.id === record.id ? record : r);
+        } else {
+          return [...prev, record];
+        }
+      });
+    }
+  };
+
 
   return (
     <AppContext.Provider value={{
@@ -649,10 +850,12 @@ export default function App() {
       leaveFolders: activeLeaveFolders,
       savedLeaveReports: activeSavedLeaveReports,
       issues: activeIssues,
+      attendanceRecords,
       previewData,
       login,
       logout,
       addFolder,
+      updateFolder,
       deleteFolder,
       addReportFolder,
       deleteReportFolder,
@@ -678,30 +881,36 @@ export default function App() {
       addSignature,
       deleteSignature,
       addLeave,
+      updateLeave,
       deleteLeave,
       addOTRecord,
       updateOTRecord,
       deleteOTRecord,
       enablePreview: setPreviewData,
-      disablePreview: () => setPreviewData(null)
+      disablePreview: () => setPreviewData(null),
+      saveAttendanceRecord
     }}>
       <Router>
         {currentUser ? (
           <Layout>
             <Routes>
               <Route path="/" element={<Dashboard />} />
-              <Route path="/create" element={<Timesheet />} />
+              <Route path="/attendance" element={<Attendance />} />
+              {/* Staff-accessible pages */}
               <Route path="/timesheet/:id/view" element={<TimesheetView />} />
-              <Route path="/employees" element={<Employees />} />
               <Route path="/templates" element={<Templates />} />
               <Route path="/leaves" element={<LeaveManagement />} />
               <Route path="/overtime" element={<OTManagement />} />
-              <Route path="/backups" element={<Backups />} />
+              <Route path="/reports" element={currentUser?.role === 'Admin/HR' ? <Reports /> : <Navigate to="/" />} />
+              <Route path="/issues" element={<IssueTracker />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/manual" element={<SystemManual />} />
               <Route path="/installation" element={<InstallationGuide />} />
-
-              <Route path="/issues" element={<IssueTracker />} />
+              {/* Admin/HR only pages — Staff is redirected to Dashboard */}
+              <Route path="/create" element={currentUser?.role === 'Admin/HR' ? <Timesheet /> : <Navigate to="/" />} />
+              <Route path="/employees" element={currentUser?.role === 'Admin/HR' ? <Employees /> : <Navigate to="/" />} />
+              <Route path="/backups" element={currentUser?.role === 'Admin/HR' ? <Backups /> : <Navigate to="/" />} />
+              <Route path="/policy" element={<Policy />} />
               <Route path="*" element={<Navigate to="/" />} />
             </Routes>
           </Layout>
@@ -728,13 +937,17 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       { name: 'Templates', href: '/templates', icon: File },
       { name: 'Leaves', href: '/leaves', icon: Calendar },
       { name: 'Overtime', href: '/overtime', icon: Clock },
+      { name: 'Reports', href: '/reports', icon: ClipboardList },
+
       { name: 'Issues', href: '/issues', icon: MessageSquare },
+      { name: 'Policy', href: '/policy', icon: BookOpen },
       { name: 'Backups', href: '/backups', icon: Database },
     ] : [
       { name: 'Template Settings', href: '/templates', icon: File },
       { name: 'My Leaves', href: '/leaves', icon: Calendar },
       { name: 'My Overtime', href: '/overtime', icon: Clock },
       { name: 'Issue Tracker', href: '/issues', icon: MessageSquare },
+      { name: 'Policy', href: '/policy', icon: BookOpen },
     ]),
     { name: 'Settings', href: '/settings', icon: SettingsIcon }
   ];
@@ -745,7 +958,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       <aside className="hidden md:flex w-64 flex-col fixed inset-y-0 bg-[#1a237e] text-white shadow-xl z-20">
         <div className="p-6 border-b border-blue-800">
           <h1 className="text-xl font-bold tracking-wider">TCF Timesheet</h1>
-          <p className="text-xs text-blue-200 mt-1">System v2.0</p>
+          <p className="text-xs text-blue-200 mt-1">System v3.0</p>
         </div>
 
         {previewData && (
@@ -797,7 +1010,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       </aside>
 
       {/* Mobile Header */}
-      <div className="md:hidden fixed top-0 left-0 right-0 h-16 bg-[#1a237e] text-white z-30 flex items-center justify-between px-4 shadow-md">
+      <div className="md:hidden print:hidden fixed top-0 left-0 right-0 h-16 bg-[#1a237e] text-white z-30 flex items-center justify-between px-4 shadow-md">
         <span className="font-bold text-lg">TCF Timesheet</span>
         <Sheet open={isMobileMenuOpen} onOpenChange={setIsMobileMenuOpen}>
           <SheetTrigger asChild>

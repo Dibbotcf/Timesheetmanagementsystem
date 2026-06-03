@@ -4740,3 +4740,130 @@ html {
     transform: translate3d(var(--tw-exit-translate-x, 0), var(--tw-exit-translate-y, 0), 0) scale3d(var(--tw-exit-scale, 1), var(--tw-exit-scale, 1), var(--tw-exit-scale, 1)) rotate(var(--tw-exit-rotate, 0));
   }
 }
+
+/* Custom CSS Print Layout for TCF Timesheet Management System */
+@media print {
+  @page {
+    size: A3 landscape;
+    margin: 8mm;
+  }
+  
+  html, body {
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    overflow: visible !important;
+    background-color: #ffffff !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  
+  /* Force all borders and backgrounds to render */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    box-sizing: border-box !important;
+  }
+
+  /* Hide all unwanted UI elements during print */
+  aside,
+  header,
+  nav,
+  .print\:hidden,
+  button,
+  .Dialog,
+  .Toaster,
+  div[role="dialog"],
+  [data-radix-popper-content-wrapper] {
+    display: none !important;
+  }
+  
+  /* Reset layout wrappers */
+  #root,
+  body > div:first-child {
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    max-width: none !important;
+    background: transparent !important;
+    display: block !important;
+    position: static !important;
+    transform: none !important;
+    overflow: visible !important;
+  }
+
+  /* Make the main page content take full width */
+  main,
+  .flex-1,
+  [class*="overflow-y-auto"],
+  [class*="overflow-hidden"] {
+    overflow: visible !important;
+    height: auto !important;
+    max-height: none !important;
+    flex: none !important;
+  }
+
+  /* Attendance print area - show full table */
+  #attendance-print-area {
+    display: block !important;
+    width: 100% !important;
+    overflow: visible !important;
+    border: 1px solid #e2e8f0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    height: auto !important;
+    min-height: auto !important;
+    max-height: none !important;
+  }
+
+  /* Table scroll container - make visible for print */
+  #attendance-print-area > div:first-child {
+    overflow: visible !important;
+    height: auto !important;
+  }
+
+  /* Make the table itself full width and all visible */
+  #attendance-print-area table {
+    width: 100% !important;
+    table-layout: fixed !important;
+    border-collapse: collapse !important;
+    font-size: 7px !important;
+  }
+
+  /* Remove sticky header for print */
+  #attendance-print-area thead {
+    position: static !important;
+  }
+
+  /* Remove sticky employee column for print */
+  #attendance-print-area td:first-child,
+  #attendance-print-area th:first-child {
+    position: static !important;
+  }
+
+  /* Table rows - compact for print */
+  #attendance-print-area td,
+  #attendance-print-area th {
+    padding: 2px 1px !important;
+    font-size: 7px !important;
+  }
+
+  /* Ensure employee name column has enough width */
+  #attendance-print-area colgroup col:first-child {
+    width: 120px !important;
+  }
+  
+  [data-name="PrintableTimesheet"] {
+    position: relative !important;
+    margin: 0 auto !important;
+    width: 100% !important;
+    background: #ffffff !important;
+  }
+}
+
+/* ── Green Glow animation for Admin-signed timesheet cards ── */
+@keyframes greenGlow {
+  0%   { box-shadow: 0 0 0 2px rgba(34,197,94,0.30), 0 0 10px 2px rgba(34,197,94,0.15); }
+  50%  { box-shadow: 0 0 0 3px rgba(34,197,94,0.55), 0 0 22px 6px rgba(34,197,94,0.30); }
+  100% { box-shadow: 0 0 0 2px rgba(34,197,94,0.30), 0 0 10px 2px rgba(34,197,94,0.15); }
+}

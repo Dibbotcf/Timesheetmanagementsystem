@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { TimesheetRecord, MonthTemplate, DailyEntry, SummaryEntry, Signature } from '../App';
-import TCF_LOGO_PATH from 'figma:asset/e496b3c659675b1f9399acaf1a235cbe1d77b03e.png';
+import TCF_LOGO_PATH from '../assets/tcf-logo-landscape.png';
 
 interface InputCellProps {
     value: string;
@@ -8,23 +8,156 @@ interface InputCellProps {
     className?: string;
     align?: "left" | "center" | "right";
     isEditing?: boolean;
+    prefix?: string;
 }
 
-const InputCell = React.memo(({ value, onChange, className = "", align = "center", isEditing }: InputCellProps) => (
+const InputCell = React.memo(({ value, onChange, className = "", align = "center", isEditing, prefix = "" }: InputCellProps) => (
     isEditing ? (
-        <input 
-            type="text" 
-            value={value || ''} 
-            onChange={(e) => onChange(e.target.value)}
-            className={`w-full h-full bg-transparent border-none outline-none px-1 focus:bg-[#eff6ff] transition-colors ${className} ${align === 'left' ? 'text-left' : align === 'right' ? 'text-right' : 'text-center'}`}
-            style={{ fontFamily: 'inherit', fontSize: 'inherit', fontWeight: 'inherit' }}
-        />
+        <div className={`w-full h-full flex items-center bg-transparent focus-within:bg-[#eff6ff] transition-colors ${align === 'left' ? 'pl-1' : align === 'right' ? 'pr-1' : ''}`}>
+            {prefix && <span className={`whitespace-nowrap font-medium pr-1 ${className}`}>{prefix}</span>}
+            <input 
+                type="text" 
+                value={value || ''} 
+                onChange={(e) => onChange(e.target.value)}
+                className={`flex-1 h-full bg-transparent border-none outline-none ${prefix ? '' : 'px-1'} ${className} ${align === 'left' ? 'text-left' : align === 'right' ? 'text-right' : 'text-center'}`}
+                style={{ fontFamily: 'inherit', fontSize: 'inherit', fontWeight: 'inherit', minWidth: 0, padding: 0 }}
+            />
+        </div>
     ) : (
         <div className={`w-full h-full flex items-center ${align === 'left' ? 'justify-start pl-1' : align === 'right' ? 'justify-end pr-1' : 'justify-center'}`}>
-             <span className={`block truncate ${className}`}>{value}</span>
+             <span className={`block truncate ${className}`}>
+                 {prefix && <span className="font-medium pr-1">{prefix}</span>}
+                 {value}
+             </span>
         </div>
     )
 ));
+
+export const parseToTimeInputVal = (timeStr: string): string => {
+    if (!timeStr) return '';
+    const cleaned = timeStr.replace('.', ':').trim().toUpperCase();
+    const hhmmRegex = /^([01]\d|2[0-3]):([0-5]\d)$/;
+    if (hhmmRegex.test(timeStr)) {
+        return timeStr;
+    }
+    const singleHhmmRegex = /^([0-9]|1[0-9]|2[0-3]):([0-5]\d)$/;
+    if (singleHhmmRegex.test(timeStr)) {
+        const parts = timeStr.split(':');
+        return `${parts[0].padStart(2, '0')}:${parts[1]}`;
+    }
+    const match = cleaned.match(/^(\d+):(\d+)\s*(AM|PM)?$/);
+    if (match) {
+        let h = parseInt(match[1], 10);
+        const m = parseInt(match[2], 10);
+        const ampm = match[3];
+        if (ampm === 'PM' && h < 12) {
+            h += 12;
+        } else if (ampm === 'AM' && h === 12) {
+            h = 0;
+        }
+        return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+    }
+    return '';
+};
+
+export const formatDisplayTime = (timeStr: string): string => {
+    if (!timeStr) return '';
+    if (timeStr.toLowerCase().includes('am') || timeStr.toLowerCase().includes('pm')) {
+        return timeStr;
+    }
+    const parts = timeStr.split(':');
+    if (parts.length === 2) {
+        const h = parseInt(parts[0], 10);
+        const m = parseInt(parts[1], 10);
+        if (!isNaN(h) && !isNaN(m)) {
+            const ampm = h >= 12 ? 'PM' : 'AM';
+            const displayH = h % 12 === 0 ? 12 : h % 12;
+            const displayM = String(m).padStart(2, '0');
+            return `${displayH}:${displayM} ${ampm}`;
+        }
+    }
+    return timeStr;
+};
+
+interface TimeInputCellProps {
+    value: string;
+    onChange: (v: string) => void;
+    className?: string;
+    isEditing?: boolean;
+    defaultTime?: string;
+}
+
+const TimeInputCell = React.memo(({ value, onChange, className = "", isEditing, defaultTime }: TimeInputCellProps) => {
+    const inputRef = React.useRef<HTMLInputElement>(null);
+
+    const handlePopulateDefault = () => {
+        if (!value && defaultTime) {
+            onChange(formatDisplayTime(defaultTime));
+        }
+    };
+
+    const handleClear = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        e.preventDefault();
+        onChange("");
+        if (inputRef.current) {
+            inputRef.current.blur();
+        }
+    };
+
+    return isEditing ? (
+        <div className="relative w-full h-full group flex items-center justify-center">
+            <input 
+                ref={inputRef}
+                type="time" 
+                value={parseToTimeInputVal(value)} 
+                onFocus={handlePopulateDefault}
+                onMouseDown={handlePopulateDefault}
+                onChange={(e) => onChange(formatDisplayTime(e.target.value))}
+                className={`w-full h-full bg-transparent border-none outline-none text-center p-0 m-0 focus:bg-[#eff6ff] transition-colors ${className}`}
+                style={{ fontFamily: 'inherit', fontSize: '9px', fontWeight: 'inherit', height: '100%', border: 'none', paddingRight: value ? '14px' : '0' }}
+            />
+            {value && (
+                <button
+                    type="button"
+                    onClick={handleClear}
+                    className="absolute right-0.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 flex items-center justify-center text-[8px] text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-full font-bold transition-colors z-20"
+                    title="Clear time"
+                    style={{ lineHeight: 1 }}
+                >
+                    ✕
+                </button>
+            )}
+        </div>
+    ) : (
+        <div className="w-full h-full flex items-center justify-center">
+             <span className={`block truncate ${className}`}>{formatDisplayTime(value)}</span>
+        </div>
+    );
+});
+
+export const timeToMinutes = (timeStr: string): number | null => {
+    const hhmm = parseToTimeInputVal(timeStr);
+    if (!hhmm) return null;
+    const parts = hhmm.split(':');
+    if (parts.length === 2) {
+        const h = parseInt(parts[0], 10);
+        const m = parseInt(parts[1], 10);
+        if (!isNaN(h) && !isNaN(m)) {
+            return h * 60 + m;
+        }
+    }
+    return null;
+};
+
+export const calcLateMinutes = (inTime: string, defaultIn: string): string => {
+    if (!inTime) return "";
+    const inMin = timeToMinutes(inTime);
+    const defMin = timeToMinutes(defaultIn);
+    if (inMin === null || defMin === null) return "";
+    const diff = inMin - defMin;
+    return diff > 0 ? String(diff) : "";
+};
 
 interface Props {
     timesheet: TimesheetRecord;
@@ -39,7 +172,23 @@ interface Props {
     approvedBySignatureId?: string;
     onCheckedByChange?: (id: string) => void;
     onApprovedByChange?: (id: string) => void;
-    canEditSignatures?: boolean; 
+    canEditSignatures?: boolean;
+    defaultClockIn?: string;   // e.g. "08:30" — used as time-picker default
+    defaultClockOut?: string;  // e.g. "17:30" — used as time-picker default
+    /** Map of { [dayOfMonth]: approvedOTHours } — drives the read-only OT column */
+    otByDay?: Record<number, number>;
+    /** Approved OT on last working day of previous month */
+    prevMonthEndOT?: number;
+    /** Total OT = current month OT + prevMonthEndOT */
+    totalOT?: number;
+    /** Approved leave entries per day: { type label, reason, isPartial } */
+    leavesByDay?: Record<number, { type: string; reason: string; isPartial?: boolean }>;
+    /** Summed approved leave days per type for this month */
+    leaveSummary?: { sick: number; casual: number; earn: number; other: number };
+    /** Map of day-of-month -> live attendance lateMinutes */
+    attendanceLateByDay?: Record<number, number>;
+    /** When true, rows that have a signature set will be locked and non-editable */
+    isStaff?: boolean;
 }
 
 // LAYOUT CONSTANTS - Compressed for A4
@@ -74,7 +223,16 @@ export const PrintableTimesheet: React.FC<Props> = ({
     approvedBySignatureId,
     onCheckedByChange,
     onApprovedByChange,
-    canEditSignatures = true
+    canEditSignatures = true,
+    defaultClockIn = '08:30',
+    defaultClockOut = '17:30',
+    otByDay = {},
+    prevMonthEndOT = 0,
+    totalOT = 0,
+    leavesByDay = {},
+    leaveSummary = { sick: 0, casual: 0, earn: 0, other: 0 },
+    attendanceLateByDay = {},
+    isStaff = false,
 }) => {
     const daysInMonth = new Date(timesheet.year, timesheet.month + 1, 0).getDate();
     const monthName = new Date(timesheet.year, timesheet.month).toLocaleString('default', { month: 'long' });
@@ -86,7 +244,7 @@ export const PrintableTimesheet: React.FC<Props> = ({
             const holiday = template?.holidays?.find(h => h.date === date);
             const isWeekend = template ? false : (d.getDay() === 5 || d.getDay() === 6); 
             
-            const entry = entries?.find(e => e.date === date) || { date: date, inTime: '', outTime: '', ot: '', remarks: '', signatureId: '' };
+            const entry = entries?.find(e => e.date === date) || { date: date, inTime: '', outTime: '', ot: '', late: '', remarks: '', signatureId: '' };
 
             return {
                 date,
@@ -101,11 +259,51 @@ export const PrintableTimesheet: React.FC<Props> = ({
         if (!onEntriesChange || !entries) return;
         const newEntries = [...entries];
         const index = newEntries.findIndex(e => e.date === date);
+        let targetEntry: DailyEntry;
+
         if (index >= 0) {
-            newEntries[index] = { ...newEntries[index], [field]: value };
+            targetEntry = { ...newEntries[index], [field]: value };
         } else {
-             newEntries.push({ date, inTime: '', outTime: '', ot: '', remarks: '', [field]: value } as DailyEntry);
+            targetEntry = { date, inTime: '', outTime: '', ot: '', late: '', remarks: '', signatureId: '', [field]: value } as DailyEntry;
         }
+
+        // Auto-calculate Late column when In Time is modified
+        if (field === 'inTime') {
+            const holiday = template?.holidays?.find(h => h.date === date);
+            const d = new Date(timesheet.year, timesheet.month, date);
+            const isWeekend = template ? false : (d.getDay() === 5 || d.getDay() === 6);
+            const isHoliday = isWeekend || holiday;
+            const leaveDay = leavesByDay?.[date];
+
+            if (value === '') {
+                targetEntry.late = '';
+                targetEntry.manualLate = false;
+                targetEntry.isLeaveOverride = false;
+            } else if (!isHoliday && !(leaveDay && leaveDay.isHalfDay)) {
+                targetEntry.late = calcLateMinutes(value, defaultClockIn || '08:30');
+            } else if (isHoliday) {
+                targetEntry.late = '';
+            }
+            // For partial leaves, we bypass auto-calculation to preserve any manual override.
+        }
+
+        if (field === 'late') {
+            targetEntry.manualLate = true;
+            targetEntry.late = value;
+            const leaveDay = leavesByDay?.[date];
+            if (leaveDay && leaveDay.isHalfDay) {
+                targetEntry.isLeaveOverride = true;
+            } else {
+                targetEntry.isLeaveOverride = false;
+            }
+        }
+
+        if (index >= 0) {
+            newEntries[index] = targetEntry;
+        } else {
+            newEntries.push(targetEntry);
+        }
+
         onEntriesChange(newEntries);
     };
 
@@ -129,12 +327,23 @@ export const PrintableTimesheet: React.FC<Props> = ({
         return (
             <div className="w-full h-full relative flex items-center justify-center">
                 {sig && (
-                    <img src={sig.imageUrl} alt="Sig" className="max-h-[14px] max-w-[90px] object-contain" />
+                    <img src={sig.imageUrl} alt="Sig" className="max-h-[14px] max-w-[90px] object-contain" crossOrigin="anonymous" />
                 )}
                 {isEditing && canEditSignatures && (
                     <select
                         value={entry.signatureId || ''}
-                        onChange={(e) => handleEntryChange(entry.date, 'signatureId', e.target.value)}
+                        onChange={(e) => {
+                            if (!onEntriesChange || !entries) return;
+                            const newSigId = e.target.value;
+                            const newEntries = [...entries];
+                            const idx = newEntries.findIndex(en => en.date === entry.date);
+                            const base = idx >= 0 ? { ...newEntries[idx] } : { date: entry.date, inTime: '', outTime: '', ot: '', late: '', remarks: '' } as DailyEntry;
+                            base.signatureId = newSigId;
+                            // Stamp today when signing; clear when removing
+                            base.signedAt = newSigId ? new Date().toISOString() : '';
+                            if (idx >= 0) newEntries[idx] = base; else newEntries.push(base);
+                            onEntriesChange(newEntries);
+                        }}
                         className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                         title="Click to select signature"
                     >
@@ -166,14 +375,15 @@ export const PrintableTimesheet: React.FC<Props> = ({
         { sl: '05', label: 'Other Leave', h: SUMMARY_ROW_H },
         { sl: '06', label: 'Eligible for Attendance Bonus', h: SUMMARY_ROW_H },
         { sl: '07', label: 'Last Working day OT of Previous Month', h: SUMMARY_ROW_H },
-        { sl: '08', label: 'Total OT', h: SUMMARY_ROW_H },
+        { sl: '08', label: 'Others', h: SUMMARY_ROW_H },
+        { sl: '09', label: 'Total OT', h: SUMMARY_ROW_H },
     ];
     const summaryHeight = summaryRows.reduce((acc, row) => acc + row.h, 0) + TABLE_HEADER_H; // + header
     
     const sigTop = summaryTop + summaryHeight + SIG_GAP;
 
     return (
-        <div className="w-[794px] min-h-[1123px] bg-white mx-auto relative text-black shadow-lg my-4 overflow-hidden"
+        <div data-name="PrintableTimesheet" className="w-[794px] min-h-[1123px] bg-white mx-auto relative text-black shadow-lg my-4 overflow-hidden"
              style={{ backgroundColor: '#ffffff', color: '#000000' }}>
              
              <div className="box-border flex flex-col items-start relative size-full">
@@ -250,10 +460,14 @@ export const PrintableTimesheet: React.FC<Props> = ({
                                  <div className="absolute border-[#000000] border-solid inset-0 pointer-events-none" style={{ borderWidth: '0px 1px 1px 0px' }} />
                                  <p className={`${fontBold} text-[11px] absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2`}>OT</p>
                              </div>
-                             <div className="absolute h-full left-[256px] top-0 w-[377.688px]">
-                                 <div className="absolute border-[#000000] border-solid inset-0 pointer-events-none" style={{ borderWidth: '0px 1px 1px 0px' }} />
-                                 <p className={`${fontBold} text-[11px] absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2`}>Remarks</p>
-                             </div>
+                              <div className="absolute h-full top-0" style={{ left: '256px', width: '48px' }}>
+                                  <div className="absolute border-[#000000] border-solid inset-0 pointer-events-none" style={{ borderWidth: '0px 1px 1px 0px' }} />
+                                  <p className={`${fontBold} text-[11px] absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2`}>Late</p>
+                              </div>
+                              <div className="absolute h-full top-0" style={{ left: '304px', width: '329.688px' }}>
+                                  <div className="absolute border-[#000000] border-solid inset-0 pointer-events-none" style={{ borderWidth: '0px 1px 1px 0px' }} />
+                                  <p className={`${fontBold} text-[11px] absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2`}>Remarks</p>
+                              </div>
                              <div className="absolute h-full left-[633.69px] top-0 w-[96px]">
                                  <div className="absolute border-[#000000] border-solid inset-0 pointer-events-none" style={{ borderWidth: '0px 0px 1px 0px' }} />
                                  <p className={`${fontBold} text-[11px] absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2`}>Signature</p>
@@ -266,10 +480,16 @@ export const PrintableTimesheet: React.FC<Props> = ({
                          {days.map((day, i) => {
                              const top = i * ROW_H;
                              const isHoliday = day.isWeekend || day.holiday;
-                             const bgClass = isHoliday ? 'bg-[#d1d5dc]' : '';
+                             // Leave day only applies to non-holiday rows
+                             const leaveDay = !isHoliday ? leavesByDay[day.date] : undefined;
+
+                             let rowBg: string;
+                             if (isHoliday) rowBg = '#d1d5dc';
+                             else if (leaveDay) rowBg = '#d9bdbf';
+                             else rowBg = 'transparent';
                              
                              return (
-                                 <div key={day.date} className={`absolute left-0 w-[729.688px] ${bgClass}`} style={{ top: `${top}px`, height: `${ROW_H}px` }}>
+                                 <div key={day.date} className="absolute left-0 w-[729.688px]" style={{ top: `${top}px`, height: `${ROW_H}px`, backgroundColor: rowBg }}>
                                      <div className="absolute h-full left-0 top-0 w-[40px]">
                                          <div className="absolute border-[#000000] border-solid inset-0 pointer-events-none" style={{ borderWidth: '0px 1px 1px 0px' }} />
                                          <p className={`${fontBold} text-[11px] absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2`}>{day.date}</p>
@@ -288,29 +508,109 @@ export const PrintableTimesheet: React.FC<Props> = ({
                                                  <DailySignatureCell entry={day.entry} />
                                              </div>
                                          </>
-                                     ) : (
+                                     ) : leaveDay && !leaveDay.isPartial ? (
+                                         // Leave day row: type label in time area, reason in remarks
                                          <>
-                                             <div className="absolute h-full left-[40px] top-0 w-[80px]">
+                                             <div className="absolute h-full left-[40px] top-0" style={{ width: '264px' }}>
                                                  <div className="absolute border-[#000000] border-solid inset-0 pointer-events-none" style={{ borderWidth: '0px 1px 1px 0px' }} />
-                                                 <InputCell isEditing={isEditing} value={day.entry.inTime} onChange={(v) => handleEntryChange(day.date, 'inTime', v)} className={`${fontRegular} text-[11px]`} />
+                                                 <p className={`${fontRegular} text-[11px] absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap`}>
+                                                     {leaveDay.type}
+                                                 </p>
                                              </div>
-                                             <div className="absolute h-full left-[120px] top-0 w-[80px]">
+                                             <div className="absolute h-full top-0" style={{ left: '304px', width: '329.688px' }}>
                                                  <div className="absolute border-[#000000] border-solid inset-0 pointer-events-none" style={{ borderWidth: '0px 1px 1px 0px' }} />
-                                                 <InputCell isEditing={isEditing} value={day.entry.outTime} onChange={(v) => handleEntryChange(day.date, 'outTime', v)} className={`${fontRegular} text-[11px]`} />
-                                             </div>
-                                             <div className="absolute h-full left-[200px] top-0 w-[56px]">
-                                                 <div className="absolute border-[#000000] border-solid inset-0 pointer-events-none" style={{ borderWidth: '0px 1px 1px 0px' }} />
-                                                 <InputCell isEditing={isEditing} value={day.entry.ot} onChange={(v) => handleEntryChange(day.date, 'ot', v)} className={`${fontRegular} text-[11px]`} />
-                                             </div>
-                                             <div className="absolute h-full left-[256px] top-0 w-[377.688px]">
-                                                 <div className="absolute border-[#000000] border-solid inset-0 pointer-events-none" style={{ borderWidth: '0px 1px 1px 0px' }} />
-                                                 <InputCell isEditing={isEditing} value={day.entry.remarks} onChange={(v) => handleEntryChange(day.date, 'remarks', v)} className={`${fontRegular} text-[11px]`} align="left" />
+                                                 <div className="w-full h-full flex items-center pl-1">
+                                                     <span className={`${fontRegular} text-[10px] truncate`}>{leaveDay.reason}</span>
+                                                 </div>
                                              </div>
                                              <div className="absolute h-full left-[633.69px] top-0 w-[96px]">
                                                  <div className="absolute border-[#000000] border-solid inset-0 pointer-events-none" style={{ borderWidth: '0px 0px 1px 0px' }} />
                                                  <DailySignatureCell entry={day.entry} />
                                              </div>
                                          </>
+                                     ) : (
+                                         (() => {
+                                             // Lock this row for Staff if Admin has signed it
+                                             const isRowLocked = isStaff && !!day.entry.signatureId;
+                                             const effectiveEditing = isEditing && !isRowLocked;
+                                             return (
+                                             <>
+                                                 {/* Locked row highlight for Staff */}
+                                                 {isRowLocked && (
+                                                     <div className="absolute inset-0 pointer-events-none" style={{ backgroundColor: 'rgba(254,226,226,0.45)', borderLeft: '3px solid #ef4444' }} />
+                                                 )}
+                                              <div className="absolute h-full left-[40px] top-0 w-[80px] overflow-hidden">
+                                                 <div className="absolute border-[#000000] border-solid inset-0 pointer-events-none" style={{ borderWidth: '0px 1px 1px 0px' }} />
+                                                 <TimeInputCell isEditing={effectiveEditing} value={day.entry.inTime} onChange={(v) => handleEntryChange(day.date, 'inTime', v)} defaultTime={defaultClockIn || '08:30'} className={`${fontRegular} text-[11px]`} />
+                                             </div>
+                                              <div className="absolute h-full left-[120px] top-0 w-[80px] overflow-hidden">
+                                                 <div className="absolute border-[#000000] border-solid inset-0 pointer-events-none" style={{ borderWidth: '0px 1px 1px 0px' }} />
+                                                 <TimeInputCell isEditing={effectiveEditing} value={day.entry.outTime} onChange={(v) => handleEntryChange(day.date, 'outTime', v)} defaultTime={defaultClockOut || '17:30'} className={`${fontRegular} text-[11px]`} />
+                                             </div>
+                                             <div className="absolute h-full left-[200px] top-0 w-[56px]">
+                                                 <div className="absolute border-[#000000] border-solid inset-0 pointer-events-none" style={{ borderWidth: '0px 1px 1px 0px' }} />
+                                                 {/* OT is always read-only — value comes from Approved OT records */}
+                                                 <InputCell
+                                                     isEditing={false}
+                                                     value={otByDay[day.date] != null ? otByDay[day.date].toFixed(2) : ''}
+                                                     onChange={() => {}}
+                                                     className={`${fontRegular} text-[11px]`}
+                                                 />
+                                             </div>
+                                              <div className="absolute h-full top-0" style={{ left: '256px', width: '48px' }}>
+                                                  <div className="absolute border-[#000000] border-solid inset-0 pointer-events-none" style={{ borderWidth: '0px 1px 1px 0px' }} />
+                                                  {(() => {
+                                                      let displayLate = day.entry.late || '';
+                                                      
+                                                      const isHalfDayLeave = !!(leaveDay && leaveDay.isHalfDay);
+                                                      const canEditLate = !!(effectiveEditing && isHalfDayLeave);
+
+                                                      if (isHalfDayLeave && !day.entry.manualLate && displayLate) {
+                                                          displayLate = '';
+                                                      }
+
+                                                      return (
+                                                          <div className="relative w-full h-full group">
+                                                              <InputCell 
+                                                                  isEditing={canEditLate} 
+                                                                  value={displayLate} 
+                                                                  onChange={(v) => handleEntryChange(day.date, 'late', v.replace(/[^0-9]/g, ''))} 
+                                                                  className={`${fontBold} text-[11px] ${leaveDay && !leaveDay.isHalfDay ? 'text-green-600' : 'text-red-600'}`} 
+                                                              />
+                                                              {isHalfDayLeave && !displayLate && (
+                                                                  <div className={`absolute inset-0 pointer-events-none flex items-center justify-center opacity-40 transition-opacity ${canEditLate ? 'group-hover:opacity-100' : ''}`} title={canEditLate ? "Click to manually enter late minutes" : "Half-day leave: late minutes disabled. Enter Edit Mode to override."}>
+                                                                      <svg className="w-3 h-3 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                                                                  </div>
+                                                              )}
+                                                          </div>
+                                                      );
+                                                  })()}
+                                              </div>
+                                              <div className="absolute h-full top-0" style={{ left: '304px', width: '329.688px' }}>
+                                                  <div className="absolute border-[#000000] border-solid inset-0 pointer-events-none" style={{ borderWidth: '0px 1px 1px 0px' }} />
+                                                  <InputCell 
+                                                      isEditing={effectiveEditing} 
+                                                      value={day.entry.remarks} 
+                                                      onChange={(v) => handleEntryChange(day.date, 'remarks', v)} 
+                                                      className={`${fontRegular} text-[11px]`} 
+                                                      align="left" 
+                                                      prefix={leaveDay && leaveDay.isPartial ? `${leaveDay.type}(${leaveDay.partialHours ? `${leaveDay.partialHours} Hours` : `${leaveDay.days} days`}) -> ${leaveDay.reason}` : ''}
+                                                  />
+                                              </div>
+                                             <div className="absolute h-full left-[633.69px] top-0 w-[96px]">
+                                                 <div className="absolute border-[#000000] border-solid inset-0 pointer-events-none" style={{ borderWidth: '0px 0px 1px 0px' }} />
+                                                 <div className="w-full h-full relative flex items-center justify-center">
+                                                     <DailySignatureCell entry={day.entry} />
+                                                     {isRowLocked && (
+                                                         <div className="absolute top-0.5 right-0.5 flex items-center justify-center" title="Row locked by Admin signature">
+                                                             <svg className="w-2.5 h-2.5 text-red-500" fill="currentColor" viewBox="0 0 24 24"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>
+                                                         </div>
+                                                     )}
+                                                 </div>
+                                             </div>
+                                         </>
+                                         );
+                                         })()
                                      )}
                                  </div>
                              )
@@ -365,8 +665,42 @@ export const PrintableTimesheet: React.FC<Props> = ({
                                          <p className={`${fontRegular} text-[11px] absolute left-[9px] top-1/2 -translate-y-1/2`}>{row.label}</p>
                                     </div>
                                     <div className="absolute h-full left-[232px] top-0 w-[160px]">
-                                         <div className="absolute border-[#000000] border-solid inset-0 pointer-events-none" style={{ borderWidth: '0px 1px 1px 0px' }} />
-                                         <InputCell isEditing={isEditing} value={summaryItem.days} onChange={(v) => handleSummaryChange(row.sl, 'days', v)} className={`${fontRegular} text-[11px]`} />
+                                        <div className="absolute border-[#000000] border-solid inset-0 pointer-events-none" style={{ borderWidth: '0px 1px 1px 0px' }} />
+                                         {(() => {
+                                             // Auto-computed read-only rows
+                                             const isReadOnly = ['01','02','03','04','05','06','07','09'].includes(row.sl);
+                                             let displayValue = summaryItem.days;
+                                             // Leave rows (auto from approved leaves)
+                                             if (row.sl === '01') displayValue = leaveSummary.sick.toFixed(2);
+                                             if (row.sl === '02') displayValue = leaveSummary.casual.toFixed(2);
+                                             if (row.sl === '03') displayValue = leaveSummary.earn.toFixed(2);
+                                             if (row.sl === '05') displayValue = leaveSummary.other.toFixed(2);
+                                             // Bonus row
+                                             if (row.sl === '06') {
+                                                 const totalLeaves = leaveSummary.sick + leaveSummary.casual + leaveSummary.earn + leaveSummary.other;
+                                                 const lateStr = summary?.find(s => s.sl === '04')?.days || '0';
+                                                 const lateNum = parseInt(lateStr, 10) || 0;
+                                                 displayValue = (totalLeaves === 0 && lateNum === 0) ? 'Yes' : 'No';
+                                             }
+                                             // OT rows
+                                             if (row.sl === '07') displayValue = prevMonthEndOT > 0 ? prevMonthEndOT.toFixed(2) : '0';
+                                             if (row.sl === '09') displayValue = totalOT > 0 ? totalOT.toFixed(2) : '0';
+                                             const cellClass = row.sl === '04'
+                                                 ? `${fontBold} text-red-600 text-[11px]`
+                                                 : row.sl === '06'
+                                                     ? `${fontBold} ${displayValue === 'Yes' ? 'text-green-600' : 'text-red-600'} text-[11px]`
+                                                     : (row.sl === '07' || row.sl === '09')
+                                                         ? `${fontBold} text-blue-700 text-[11px]`
+                                                         : `${fontRegular} text-[11px]`;
+                                             return (
+                                                 <InputCell
+                                                     isEditing={isReadOnly ? false : isEditing}
+                                                     value={displayValue}
+                                                     onChange={(v) => handleSummaryChange(row.sl, 'days', v)}
+                                                     className={cellClass}
+                                                 />
+                                             );
+                                         })()}
                                     </div>
                                     <div className="absolute h-full left-[392px] top-0 w-[337.688px]">
                                          <div className="absolute border-[#000000] border-solid inset-0 pointer-events-none" style={{ borderWidth: '0px 0px 1px 0px' }} />

@@ -7,13 +7,14 @@ import { Textarea } from '../components/ui/textarea';
 import { Badge } from '../components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from '../components/ui/dialog';
 import { Popover, PopoverContent, PopoverTrigger } from '../components/ui/popover';
-import { Calendar as CalendarIcon, Plus, Trash2, User, AlertCircle, Settings, RefreshCw, LayoutList, UserSquare2, History, ArrowRightLeft, Folder, Save, File, Download, Eye, X } from 'lucide-react';
+import { Calendar as CalendarIcon, Plus, Trash2, User, AlertCircle, Settings, RefreshCw, LayoutList, UserSquare2, History, ArrowRightLeft, Folder, Save, File, Download, Eye, X, Check, ChevronsUpDown } from 'lucide-react';
 import { Checkbox } from '../components/ui/checkbox';
 import { useAppStore, LeaveType, LeaveRequest, Employee, SavedLeaveReport } from '../App';
 import { toast } from 'sonner@2.0.3';
 import { format, differenceInDays, parseISO, addYears, differenceInYears } from 'date-fns';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '../components/ui/command';
 
 // --- Leave Config Constants ---
 const LEAVE_LIMITS = {
@@ -25,14 +26,19 @@ const LEAVE_LIMITS = {
 };
 
 export const LeaveManagement: React.FC = () => {
-  const { employees, leaves, addLeave, deleteLeave, updateEmployee, deleteEmployee, currentUser, leaveFolders, addLeaveFolder, deleteLeaveFolder, savedLeaveReports, addSavedLeaveReport, deleteSavedLeaveReport, getItem } = useAppStore();
+  const { employees, leaves, addLeave, updateLeave, deleteLeave, updateEmployee, deleteEmployee, currentUser, leaveFolders, addLeaveFolder, deleteLeaveFolder, savedLeaveReports, addSavedLeaveReport, deleteSavedLeaveReport, getItem } = useAppStore();
   
   const isStaff = currentUser?.role === 'Staff';
 
-  const [viewMode, setViewMode] = useState<'individual' | 'list' | 'records'>('individual');
+  const [viewMode, setViewMode] = useState<'individual' | 'list' | 'records' | 'pending'>('individual');
+  const [pendingSearchQuery, setPendingSearchQuery] = useState('');
+  const [pendingTypeFilter, setPendingTypeFilter] = useState('All');
+  const [pendingMonthFilter, setPendingMonthFilter] = useState('');
+  const [pendingEmployeeFilter, setPendingEmployeeFilter] = useState('All');
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>('');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isSetLimitOpen, setIsSetLimitOpen] = useState(false);
+  const [openEmployeeSelect, setOpenEmployeeSelect] = useState(false);
 
   // Transfer / Archive State
   const [selectedForTransfer, setSelectedForTransfer] = useState<Set<string>>(new Set());
@@ -58,19 +64,30 @@ export const LeaveManagement: React.FC = () => {
   const [endDate, setEndDate] = useState('');
   const [reason, setReason] = useState('');
   
-  // Partial Day State
-  const [isPartialDay, setIsPartialDay] = useState(false);
+  // Duration State
+  const [durationMode, setDurationMode] = useState<'full' | 'half' | 'partial'>('full');
   const [partialHours, setPartialHours] = useState('');
 
   // Limit Editing State
   const [tempLimits, setTempLimits] = useState<Partial<Record<LeaveType, number | undefined>>>({});
   const [tempUsed, setTempUsed] = useState<Partial<Record<LeaveType, number | undefined>>>({});
 
+  // History Month Filter
+  const [historyMonthFilter, setHistoryMonthFilter] = useState<string>(
+    new Date().toISOString().substring(0, 7)
+  );
+
   const selectedEmployee = employees.find(e => e.id === selectedEmployeeId);
 
   // Filter leaves for selected employee for display
   const employeeLeaves = leaves
     .filter(l => l.employeeId === selectedEmployeeId)
+    .filter(l => {
+        if (!historyMonthFilter) return true;
+        const leaveStartMonth = l.startDate.substring(0, 7);
+        const leaveEndMonth = l.endDate.substring(0, 7);
+        return leaveStartMonth === historyMonthFilter || leaveEndMonth === historyMonthFilter;
+    })
     .sort((a, b) => new Date(b.startDate).getTime() - new Date(a.startDate).getTime());
 
   // --- Helper Functions (reused for both views) ---
@@ -78,10 +95,13 @@ export const LeaveManagement: React.FC = () => {
   const calculateEmployeeLeaveStats = (emp: Employee) => {
     const empLeaves = leaves.filter(l => l.employeeId === emp.id);
     
-    const actualUsedLeaves = empLeaves.reduce((acc, curr) => {
+    // Only APPROVED leaves count against balances
+    const actualUsedLeaves = empLeaves
+      .filter(l => l.status === 'Approved')
+      .reduce((acc, curr) => {
         acc[curr.type] = (acc[curr.type] || 0) + curr.days;
         return acc;
-    }, {} as Record<LeaveType, number>);
+      }, {} as Record<LeaveType, number>);
 
     const yearsOfService = differenceInYears(new Date(), parseISO(emp.joiningDate));
     const isEligibleForAnnual = yearsOfService >= 1;
@@ -219,7 +239,14 @@ export const LeaveManagement: React.FC = () => {
     let finalStartDate = startDate;
     let finalEndDate = endDate;
 
-    if (isPartialDay) {
+    if (durationMode === 'half') {
+        if (!startDate) {
+            toast.error("Please select a date");
+            return;
+        }
+        days = 0.5;
+        finalEndDate = startDate; // Single day
+    } else if (durationMode === 'partial') {
         if (!startDate) {
             toast.error("Please select a date");
             return;
@@ -228,8 +255,7 @@ export const LeaveManagement: React.FC = () => {
             toast.error("Please enter valid hours");
             return;
         }
-        // Assume 8 hour work day standard
-        days = Number(partialHours) / 8;
+        days = 0; // Partial day does not count towards leave balance
         finalEndDate = startDate; // Single day
     } else {
         if (!startDate || !endDate) {
@@ -275,8 +301,10 @@ export const LeaveManagement: React.FC = () => {
       startDate: finalStartDate,
       endDate: finalEndDate,
       days,
+      partialHours: durationMode === 'partial' ? Number(partialHours) : undefined,
       reason,
-      status: 'Approved' 
+      // Staff submits as Pending; Admin/HR records are auto-Approved
+      status: isStaff ? 'Pending' : 'Approved'
     });
 
     toast.success("Leave recorded successfully");
@@ -286,7 +314,7 @@ export const LeaveManagement: React.FC = () => {
     setStartDate('');
     setEndDate('');
     setReason('');
-    setIsPartialDay(false);
+    setDurationMode('full');
     setPartialHours('');
   };
 
@@ -325,34 +353,39 @@ export const LeaveManagement: React.FC = () => {
         }
     }
 
-    // Generate Snapshot Data
-    const selectedEmps = employees.filter(e => selectedForTransfer.has(e.id));
-    const snapshotData = selectedEmps.map(emp => {
-        const stats = calculateEmployeeLeaveStats(emp);
-        return {
-            id: emp.id,
-            name: emp.name,
-            eid: emp.eid,
-            joiningDate: emp.joiningDate,
-            stats: {
-                Casual: { limit: stats.getLimit('Casual'), used: stats.getUsed('Casual'), balance: stats.getBalance('Casual') },
-                Sick: { limit: stats.getLimit('Sick'), used: stats.getUsed('Sick'), balance: stats.getBalance('Sick') },
-                Annual: { limit: stats.getLimit('Annual'), used: stats.getUsed('Annual'), balance: stats.getBalance('Annual') },
-                Maternity: { limit: stats.getLimit('Maternity'), used: stats.getUsed('Maternity'), balance: stats.getBalance('Maternity') },
-            }
-        };
-    });
+    if (selectedForTransfer.size > 0) {
+        // Generate Snapshot Data
+        const selectedEmps = employees.filter(e => selectedForTransfer.has(e.id));
+        const snapshotData = selectedEmps.map(emp => {
+            const stats = calculateEmployeeLeaveStats(emp);
+            return {
+                id: emp.id,
+                name: emp.name,
+                eid: emp.eid,
+                joiningDate: emp.joiningDate,
+                stats: {
+                    Casual: { limit: stats.getLimit('Casual'), used: stats.getUsed('Casual'), balance: stats.getBalance('Casual') },
+                    Sick: { limit: stats.getLimit('Sick'), used: stats.getUsed('Sick'), balance: stats.getBalance('Sick') },
+                    Annual: { limit: stats.getLimit('Annual'), used: stats.getUsed('Annual'), balance: stats.getBalance('Annual') },
+                    Maternity: { limit: stats.getLimit('Maternity'), used: stats.getUsed('Maternity'), balance: stats.getBalance('Maternity') },
+                }
+            };
+        });
 
-    const generatedName = `Archive - ${format(new Date(), 'MMM dd, yyyy HH:mm')}`;
+        const generatedName = `Archive - ${format(new Date(), 'MMM dd, yyyy HH:mm')}`;
 
-    addSavedLeaveReport({
-        folderId,
-        name: generatedName,
-        createdAt: new Date().toISOString(),
-        data: snapshotData
-    });
+        addSavedLeaveReport({
+            folderId,
+            name: generatedName,
+            createdAt: new Date().toISOString(),
+            data: snapshotData
+        });
 
-    toast.success("Leave records archived successfully!");
+        toast.success("Leave records archived successfully!");
+    } else {
+        toast.success("Folder created successfully!");
+    }
+
     setIsTransferDialogOpen(false);
     setSelectedForTransfer(new Set());
     setTransferFolderName('');
@@ -430,6 +463,8 @@ export const LeaveManagement: React.FC = () => {
      );
   }
 
+  const globalPendingLeavesCount = leaves.filter(l => l.status === 'Pending').length;
+
   return (
     <div className="space-y-6 max-w-6xl mx-auto pb-20">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -455,17 +490,34 @@ export const LeaveManagement: React.FC = () => {
                 <LayoutList className="h-4 w-4" /> {isStaff ? 'My Summary' : 'All Employees'}
             </Button>
              {!isStaff && (
-                <Button 
-                    variant={viewMode === 'records' ? 'secondary' : 'ghost'} 
-                    size="sm" 
-                    onClick={() => setViewMode('records')}
-                    className="gap-2"
-                >
-                    <Folder className="h-4 w-4" /> Records
-                </Button>
+                <>
+                  <Button 
+                      variant={viewMode === 'records' ? 'secondary' : 'ghost'} 
+                      size="sm" 
+                      onClick={() => setViewMode('records')}
+                      className="gap-2"
+                  >
+                      <Folder className="h-4 w-4" /> Records
+                  </Button>
+                  <Button 
+                      variant={viewMode === 'pending' ? 'secondary' : 'ghost'} 
+                      size="sm" 
+                      onClick={() => setViewMode('pending')}
+                      className="gap-2"
+                  >
+                      <AlertCircle className="h-4 w-4 text-amber-500" /> Pending Leaves
+                      {globalPendingLeavesCount > 0 && (
+                          <Badge className="ml-1 bg-amber-500 hover:bg-amber-600 text-white">
+                              {globalPendingLeavesCount}
+                          </Badge>
+                      )}
+                  </Button>
+                </>
             )}
         </div>
       </div>
+
+
 
       {/* Transfer Dialog */}
       <Dialog open={isTransferDialogOpen} onOpenChange={setIsTransferDialogOpen}>
@@ -523,8 +575,13 @@ export const LeaveManagement: React.FC = () => {
                 </div>
             </div>
             <DialogFooter>
-                <Button onClick={handleTransfer} disabled={selectedForTransfer.size === 0}>
-                    {isCreatingFolder ? 'Create Folder & Archive' : 'Archive Records'}
+                <Button 
+                    onClick={handleTransfer} 
+                    disabled={!isCreatingFolder && selectedForTransfer.size === 0}
+                >
+                    {isCreatingFolder 
+                        ? (selectedForTransfer.size > 0 ? 'Create Folder & Archive' : 'Create Folder') 
+                        : 'Archive Records'}
                 </Button>
             </DialogFooter>
         </DialogContent>
@@ -545,16 +602,72 @@ export const LeaveManagement: React.FC = () => {
                                     {currentUser?.name} ({currentUser?.eid})
                                 </div>
                             ) : (
-                                <Select value={selectedEmployeeId} onValueChange={setSelectedEmployeeId}>
-                                    <SelectTrigger className="bg-white">
-                                        <SelectValue placeholder="Search employee..." />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {employees.map(emp => (
-                                            <SelectItem key={emp.id} value={emp.id}>{emp.name} ({emp.eid})</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
+                                <Popover open={openEmployeeSelect} onOpenChange={setOpenEmployeeSelect}>
+                                    <PopoverTrigger asChild>
+                                        <Button
+                                            variant="outline"
+                                            role="combobox"
+                                            aria-expanded={openEmployeeSelect}
+                                            className="w-full justify-between bg-white border border-gray-200 shadow-sm font-normal hover:bg-gray-50 text-left px-3 h-10"
+                                        >
+                                            <span className="truncate flex-1">
+                                                {selectedEmployeeId 
+                                                    ? `${employees.find(e => e.id === selectedEmployeeId)?.name} (${employees.find(e => e.id === selectedEmployeeId)?.eid})`
+                                                    : "Search employee..."}
+                                            </span>
+                                            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                        </Button>
+                                    </PopoverTrigger>
+                                    <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0 animate-none" align="start">
+                                        <Command>
+                                            <CommandInput placeholder="Search employee..." />
+                                            <CommandList>
+                                                <CommandEmpty>No employee found.</CommandEmpty>
+                                                <CommandGroup>
+                                                    <CommandItem
+                                                        key="nope"
+                                                        value="Select None"
+                                                        onSelect={() => {
+                                                            setSelectedEmployeeId('');
+                                                            setOpenEmployeeSelect(false);
+                                                        }}
+                                                    >
+                                                        <Check
+                                                            className={`mr-2 h-4 w-4 ${selectedEmployeeId === '' ? "opacity-100" : "opacity-0"}`}
+                                                        />
+                                                        Select None
+                                                    </CommandItem>
+                                                    {([...employees].sort((a, b) => {
+                                                        const eIdA = a.eid || '';
+                                                        const eIdB = b.eid || '';
+                                                        const parseEidNumber = (eid: string): number => {
+                                                            const match = eid.match(/\d+/);
+                                                            return match ? parseInt(match[0], 10) : Infinity;
+                                                        };
+                                                        const aNum = parseEidNumber(eIdA);
+                                                        const bNum = parseEidNumber(eIdB);
+                                                        if (aNum !== bNum) return aNum - bNum;
+                                                        return eIdA.localeCompare(eIdB);
+                                                    })).map((emp) => (
+                                                        <CommandItem
+                                                            key={emp.id}
+                                                            value={`${emp.name} ${emp.eid}`}
+                                                            onSelect={() => {
+                                                                setSelectedEmployeeId(emp.id);
+                                                                setOpenEmployeeSelect(false);
+                                                            }}
+                                                        >
+                                                            <Check
+                                                                className={`mr-2 h-4 w-4 ${selectedEmployeeId === emp.id ? "opacity-100" : "opacity-0"}`}
+                                                            />
+                                                            {emp.name} ({emp.eid})
+                                                        </CommandItem>
+                                                    ))}
+                                                </CommandGroup>
+                                            </CommandList>
+                                        </Command>
+                                    </PopoverContent>
+                                </Popover>
                             )}
                         </div>
                         {selectedEmployee && currentStats && (
@@ -782,151 +895,192 @@ export const LeaveManagement: React.FC = () => {
 
                     {/* Leave History & Actions */}
                     <div className="md:col-span-2 space-y-4">
-                        <div className="flex justify-between items-center">
+                        <div className="flex justify-between items-center flex-wrap gap-3">
                             <h3 className="font-semibold text-lg">Leave History</h3>
-                            {!isStaff && (
+                            <div className="flex items-center gap-3">
+                                <div className="flex items-center gap-2">
+                                    <label className="text-sm text-gray-500 font-medium">Filter:</label>
+                                    <input 
+                                        type="month" 
+                                        value={historyMonthFilter} 
+                                        onChange={e => setHistoryMonthFilter(e.target.value)} 
+                                        className="h-9 px-3 border border-gray-200 rounded-md text-sm bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-700"
+                                        title="Clear to see all records"
+                                    />
+                                </div>
                                 <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
                                     <DialogTrigger asChild>
                                         <Button className="bg-blue-600 hover:bg-blue-700">
                                             <Plus className="h-4 w-4 mr-2" /> Record Leave
                                         </Button>
                                     </DialogTrigger>
-                                    <DialogContent className="max-w-md">
-                                    <DialogHeader>
-                                        <DialogTitle>Record New Leave</DialogTitle>
-                                        <DialogDescription>
-                                            Fill in the details below to record a new leave for this employee.
-                                        </DialogDescription>
-                                    </DialogHeader>
-                                        <div className="space-y-4 py-4">
-                                            <div className="space-y-2">
-                                                <label className="text-sm font-medium">Leave Type</label>
-                                                <Select value={leaveType} onValueChange={(v) => setLeaveType(v as LeaveType)}>
-                                                    <SelectTrigger>
-                                                        <SelectValue />
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                        {Object.keys(LEAVE_LIMITS).map(type => (
-                                                            <SelectItem 
-                                                                key={type} 
-                                                                value={type}
-                                                                disabled={
-                                                                    (selectedEmployee?.customLeaveLimits?.[type as LeaveType] === undefined) && (
-                                                                        (type === 'Maternity' && !currentStats.isEligibleForMaternity) ||
-                                                                        (type === 'Annual' && !currentStats.isEligibleForAnnual)
-                                                                    )
-                                                                }
-                                                            >
-                                                                {type}
-                                                            </SelectItem>
-                                                        ))}
-                                                    </SelectContent>
-                                                </Select>
+                                <DialogContent className="max-w-md">
+                                <DialogHeader>
+                                    <DialogTitle>Record New Leave</DialogTitle>
+                                    <DialogDescription>
+                                        Fill in the details below to record a new leave.
+                                    </DialogDescription>
+                                </DialogHeader>
+                                    <div className="space-y-4 py-4">
+                                        <div className="space-y-2">
+                                            <label className="text-sm font-medium">Leave Type</label>
+                                            <Select value={leaveType} onValueChange={(v) => setLeaveType(v as LeaveType)}>
+                                                <SelectTrigger>
+                                                    <SelectValue />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {Object.keys(LEAVE_LIMITS).map(type => (
+                                                        <SelectItem 
+                                                            key={type} 
+                                                            value={type}
+                                                            disabled={
+                                                                (selectedEmployee?.customLeaveLimits?.[type as LeaveType] === undefined) && (
+                                                                    (type === 'Maternity' && !currentStats.isEligibleForMaternity) ||
+                                                                    (type === 'Annual' && !currentStats.isEligibleForAnnual)
+                                                                )
+                                                            }
+                                                        >
+                                                            {type}
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+
+                                        {/* Duration Selection */}
+                                        <div className="bg-gray-50 p-3 rounded-md border space-y-3">
+                                            <div className="flex flex-col md:flex-row md:items-center gap-2 md:gap-4">
+                                                <span className="text-sm font-medium">Duration:</span>
+                                                <div className="flex items-center gap-4 flex-wrap">
+                                                    <label className="flex items-center gap-2 text-sm cursor-pointer">
+                                                        <input 
+                                                            type="radio" 
+                                                            className="accent-black"
+                                                            checked={durationMode === 'full'} 
+                                                            onChange={() => setDurationMode('full')} 
+                                                        /> 
+                                                        Full Day(s)
+                                                    </label>
+                                                    <label className="flex items-center gap-2 text-sm cursor-pointer">
+                                                        <input 
+                                                            type="radio" 
+                                                            className="accent-black"
+                                                            checked={durationMode === 'half'} 
+                                                            onChange={() => setDurationMode('half')} 
+                                                        /> 
+                                                        Half Day
+                                                    </label>
+                                                    <label className="flex items-center gap-2 text-sm cursor-pointer">
+                                                        <input 
+                                                            type="radio" 
+                                                            className="accent-black"
+                                                            checked={durationMode === 'partial'} 
+                                                            onChange={() => setDurationMode('partial')} 
+                                                        /> 
+                                                        Partial Day / Hourly
+                                                    </label>
+                                                </div>
                                             </div>
 
-                                            {/* Duration Selection */}
-                                            <div className="bg-gray-50 p-3 rounded-md border space-y-3">
-                                                <div className="flex items-center gap-4">
-                                                    <span className="text-sm font-medium">Duration:</span>
-                                                    <div className="flex items-center gap-4">
-                                                        <label className="flex items-center gap-2 text-sm cursor-pointer">
-                                                            <input 
-                                                                type="radio" 
-                                                                className="accent-black"
-                                                                checked={!isPartialDay} 
-                                                                onChange={() => setIsPartialDay(false)} 
-                                                            /> 
-                                                            Full Day(s)
-                                                        </label>
-                                                        <label className="flex items-center gap-2 text-sm cursor-pointer">
-                                                            <input 
-                                                                type="radio" 
-                                                                className="accent-black"
-                                                                checked={isPartialDay} 
-                                                                onChange={() => setIsPartialDay(true)} 
-                                                            /> 
-                                                            Partial Day / Hourly
-                                                        </label>
+                                            {durationMode === 'full' && (
+                                                <div className="grid grid-cols-2 gap-4">
+                                                    <div className="space-y-2">
+                                                        <label className="text-sm font-medium">Start Date</label>
+                                                        <Input 
+                                                            type="date" 
+                                                            value={startDate} 
+                                                            onChange={e => setStartDate(e.target.value)} 
+                                                            className="bg-white [&::-webkit-calendar-picker-indicator]:filter-[brightness(0)_saturate(100%)] [&::-webkit-calendar-picker-indicator]:opacity-100"
+                                                        />
+                                                    </div>
+                                                    <div className="space-y-2">
+                                                        <label className="text-sm font-medium">End Date</label>
+                                                        <Input 
+                                                            type="date" 
+                                                            value={endDate} 
+                                                            onChange={e => setEndDate(e.target.value)} 
+                                                            className="bg-white [&::-webkit-calendar-picker-indicator]:filter-[brightness(0)_saturate(100%)] [&::-webkit-calendar-picker-indicator]:opacity-100"
+                                                        />
                                                     </div>
                                                 </div>
+                                            )}
 
-                                                {!isPartialDay ? (
-                                                    <div className="grid grid-cols-2 gap-4">
-                                                        <div className="space-y-2">
-                                                            <label className="text-sm font-medium">Start Date</label>
-                                                            <Input 
-                                                                type="date" 
-                                                                value={startDate} 
-                                                                onChange={e => setStartDate(e.target.value)} 
-                                                                className="bg-white [&::-webkit-calendar-picker-indicator]:filter-[brightness(0)_saturate(100%)] [&::-webkit-calendar-picker-indicator]:opacity-100"
-                                                            />
-                                                        </div>
-                                                        <div className="space-y-2">
-                                                            <label className="text-sm font-medium">End Date</label>
-                                                            <Input 
-                                                                type="date" 
-                                                                value={endDate} 
-                                                                onChange={e => setEndDate(e.target.value)} 
-                                                                className="bg-white [&::-webkit-calendar-picker-indicator]:filter-[brightness(0)_saturate(100%)] [&::-webkit-calendar-picker-indicator]:opacity-100"
-                                                            />
-                                                        </div>
+                                            {durationMode === 'half' && (
+                                                <div className="grid grid-cols-2 gap-4">
+                                                    <div className="space-y-2">
+                                                        <label className="text-sm font-medium">Date</label>
+                                                        <Input 
+                                                            type="date" 
+                                                            value={startDate} 
+                                                            onChange={e => {
+                                                                setStartDate(e.target.value);
+                                                                setEndDate(e.target.value);
+                                                            }} 
+                                                            className="bg-white [&::-webkit-calendar-picker-indicator]:filter-[brightness(0)_saturate(100%)] [&::-webkit-calendar-picker-indicator]:opacity-100"
+                                                        />
                                                     </div>
-                                                ) : (
-                                                    <div className="grid grid-cols-2 gap-4">
-                                                        <div className="space-y-2">
-                                                            <label className="text-sm font-medium">Date</label>
-                                                            <Input 
-                                                                type="date" 
-                                                                value={startDate} 
-                                                                onChange={e => {
-                                                                    setStartDate(e.target.value);
-                                                                    setEndDate(e.target.value);
-                                                                }} 
-                                                                className="bg-white [&::-webkit-calendar-picker-indicator]:filter-[brightness(0)_saturate(100%)] [&::-webkit-calendar-picker-indicator]:opacity-100"
-                                                            />
-                                                        </div>
-                                                        <div className="space-y-2">
-                                                            <label className="text-sm font-medium">Hours</label>
-                                                            <Input 
-                                                                type="number" 
-                                                                min="0.5"
-                                                                max="24"
-                                                                step="0.5"
-                                                                placeholder="e.g. 4"
-                                                                value={partialHours} 
-                                                                onChange={e => setPartialHours(e.target.value)}
-                                                                className="bg-white" 
-                                                            />
-                                                            {partialHours && (
-                                                                <p className="text-[10px] text-gray-500 text-right">
-                                                                    = {(Number(partialHours) / 8).toFixed(3)} Days
-                                                                </p>
-                                                            )}
-                                                        </div>
+                                                    <div className="space-y-2 flex flex-col justify-center pt-6">
+                                                        <p className="text-sm font-medium text-amber-700 bg-amber-50 px-3 py-1.5 rounded-md inline-block">
+                                                            Counts as 0.5 Days
+                                                        </p>
                                                     </div>
-                                                )}
-                                            </div>
+                                                </div>
+                                            )}
 
-                                            <div className="space-y-2">
-                                                <label className="text-sm font-medium">Reason</label>
-                                                <Textarea 
-                                                    placeholder="Enter reason for leave..." 
-                                                    value={reason}
-                                                    onChange={e => setReason(e.target.value)}
-                                                />
-                                            </div>
-                                            {!isPartialDay && startDate && endDate && (
-                                                <div className="p-3 bg-gray-50 rounded text-sm text-center">
-                                                    Calculated Duration: <span className="font-bold">{Math.max(0, differenceInDays(parseISO(endDate), parseISO(startDate)) + 1)} Days</span>
+                                            {durationMode === 'partial' && (
+                                                <div className="grid grid-cols-2 gap-4">
+                                                    <div className="space-y-2">
+                                                        <label className="text-sm font-medium">Date</label>
+                                                        <Input 
+                                                            type="date" 
+                                                            value={startDate} 
+                                                            onChange={e => {
+                                                                setStartDate(e.target.value);
+                                                                setEndDate(e.target.value);
+                                                            }} 
+                                                            className="bg-white [&::-webkit-calendar-picker-indicator]:filter-[brightness(0)_saturate(100%)] [&::-webkit-calendar-picker-indicator]:opacity-100"
+                                                        />
+                                                    </div>
+                                                    <div className="space-y-2">
+                                                        <label className="text-sm font-medium">Hours</label>
+                                                        <Input 
+                                                            type="number" 
+                                                            min="0.5"
+                                                            max="24"
+                                                            step="0.5"
+                                                            placeholder="e.g. 4"
+                                                            value={partialHours} 
+                                                            onChange={e => setPartialHours(e.target.value)}
+                                                            className="bg-white" 
+                                                        />
+                                                        <p className="text-[10px] text-gray-500 text-right">
+                                                            Does not affect leave balance
+                                                        </p>
+                                                    </div>
                                                 </div>
                                             )}
                                         </div>
-                                    <DialogFooter>
-                                        <Button onClick={handleSubmitLeave}>Confirm & Save</Button>
-                                    </DialogFooter>
-                                </DialogContent>
-                            </Dialog>
-                            )}
+
+                                        <div className="space-y-2">
+                                            <label className="text-sm font-medium">Reason</label>
+                                            <Textarea 
+                                                placeholder="Enter reason for leave..." 
+                                                value={reason}
+                                                onChange={e => setReason(e.target.value)}
+                                            />
+                                        </div>
+                                        {durationMode === 'full' && startDate && endDate && (
+                                            <div className="p-3 bg-gray-50 rounded text-sm text-center">
+                                                Calculated Duration: <span className="font-bold">{Math.max(0, differenceInDays(parseISO(endDate), parseISO(startDate)) + 1)} Days</span>
+                                            </div>
+                                        )}
+                                    </div>
+                                <DialogFooter>
+                                    <Button onClick={handleSubmitLeave}>Confirm & Save</Button>
+                                </DialogFooter>
+                            </DialogContent>
+                        </Dialog>
+                            </div>
                         </div>
 
                         {employeeLeaves.length === 0 ? (
@@ -938,36 +1092,75 @@ export const LeaveManagement: React.FC = () => {
                             </Card>
                         ) : (
                             <div className="space-y-3">
-                                {employeeLeaves.map(leave => (
-                                    <Card key={leave.id}>
-                                        <CardContent className="p-4 flex items-center justify-between">
-                                            <div>
-                                                <div className="flex items-center gap-2 mb-1">
+                                {employeeLeaves.map(leave => {
+                                    const isPending = leave.status === 'Pending';
+                                    const isRejected = leave.status === 'Rejected';
+                                    return (
+                                    <Card key={leave.id} className={isPending ? 'border-amber-300 bg-amber-50' : isRejected ? 'border-red-200 bg-red-50' : ''}>
+                                        <CardContent className="p-4 flex items-center justify-between gap-3">
+                                            <div className="flex-1 min-w-0">
+                                                <div className="flex items-center gap-2 mb-1 flex-wrap">
                                                     <Badge variant="outline">{leave.type}</Badge>
                                                     <span className="text-sm font-medium text-gray-500">
-                                                        {leave.days} Day{leave.days > 1 ? 's' : ''}
+                                                        {leave.partialHours ? `${leave.partialHours} Hour${leave.partialHours > 1 ? 's' : ''}` : `${leave.days} Day${leave.days > 1 ? 's' : ''}`}
                                                     </span>
+                                                    {/* Status Badge */}
+                                                    {isPending && <Badge className="bg-amber-100 text-amber-800 border-amber-300 text-[10px]">⏳ Pending</Badge>}
+                                                    {isRejected && <Badge className="bg-red-100 text-red-700 border-red-300 text-[10px]">✗ Rejected</Badge>}
+                                                    {leave.status === 'Approved' && <Badge className="bg-green-100 text-green-800 border-green-300 text-[10px]">✓ Approved</Badge>}
                                                 </div>
                                                 <h4 className="font-bold text-sm">
                                                     {format(parseISO(leave.startDate), 'MMM dd, yyyy')} - {format(parseISO(leave.endDate), 'MMM dd, yyyy')}
                                                 </h4>
                                                 <p className="text-sm text-gray-600 mt-1">{leave.reason}</p>
                                             </div>
-                                            {!isStaff && (
-                                                <Button 
-                                                    variant="ghost" 
-                                                    size="icon" 
-                                                    className="text-gray-400 hover:text-red-500"
-                                                    onClick={() => {
-                                                        if(confirm('Delete this leave record?')) deleteLeave(leave.id);
-                                                    }}
-                                                >
-                                                    <Trash2 className="h-4 w-4" />
-                                                </Button>
-                                            )}
+                                            <div className="flex items-center gap-1 shrink-0">
+                                                {/* Admin approve/reject buttons for Pending */}
+                                                {!isStaff && isPending && (
+                                                    <>
+                                                        <Button
+                                                            size="icon"
+                                                            variant="ghost"
+                                                            className="h-8 w-8 text-green-600 hover:bg-green-50 hover:text-green-700"
+                                                            title="Approve"
+                                                            onClick={() => {
+                                                                updateLeave(leave.id, { status: 'Approved' });
+                                                                toast.success('Leave approved');
+                                                            }}
+                                                        >
+                                                            <Check className="h-4 w-4" />
+                                                        </Button>
+                                                        <Button
+                                                            size="icon"
+                                                            variant="ghost"
+                                                            className="h-8 w-8 text-red-500 hover:bg-red-50 hover:text-red-700"
+                                                            title="Reject"
+                                                            onClick={() => {
+                                                                updateLeave(leave.id, { status: 'Rejected' });
+                                                                toast.error('Leave rejected');
+                                                            }}
+                                                        >
+                                                            <X className="h-4 w-4" />
+                                                        </Button>
+                                                    </>
+                                                )}
+                                                {!isStaff && (
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        className="h-8 w-8 text-gray-400 hover:text-red-500"
+                                                        onClick={() => {
+                                                            if(confirm('Delete this leave record?')) deleteLeave(leave.id);
+                                                        }}
+                                                    >
+                                                        <Trash2 className="h-4 w-4" />
+                                                    </Button>
+                                                )}
+                                            </div>
                                         </CardContent>
                                     </Card>
-                                ))}
+                                    );
+                                })}
                             </div>
                         )}
                     </div>
@@ -1135,7 +1328,7 @@ export const LeaveManagement: React.FC = () => {
                 </Table>
             </CardContent>
         </Card>
-      ) : (
+      ) : viewMode === 'records' ? (
         // Records View
         <div className="space-y-6">
              <div className="flex items-center justify-between">
@@ -1203,8 +1396,132 @@ export const LeaveManagement: React.FC = () => {
                      </Card>
                  ))}
              </div>
-        </div>
-      )}
+         </div>
+      ) : viewMode === 'pending' && !isStaff ? (
+        <Card>
+            <CardHeader>
+                <CardTitle className="flex justify-between items-center">
+                    <div className="flex items-center gap-2 text-amber-800">
+                        ⏳ Pending Leave Approvals
+                        <Badge className="bg-amber-500 hover:bg-amber-600 text-white">{globalPendingLeavesCount}</Badge>
+                    </div>
+                </CardTitle>
+                <CardDescription>Review and manage all pending leave requests.</CardDescription>
+            </CardHeader>
+            <CardContent>
+                <div className="flex flex-col md:flex-row gap-4 mb-6">
+                    <div className="relative flex-1">
+                        <Input 
+                            placeholder="Search employee by name or ID..."
+                            value={pendingSearchQuery}
+                            onChange={(e) => setPendingSearchQuery(e.target.value)}
+                            className="pl-9"
+                        />
+                        <User className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+                    </div>
+                    <Select value={pendingEmployeeFilter} onValueChange={setPendingEmployeeFilter}>
+                        <SelectTrigger className="w-[200px]">
+                            <SelectValue placeholder="All Employees" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="All">All Employees</SelectItem>
+                            {employees.filter(e => e.status === 'Active').map(emp => (
+                                <SelectItem key={emp.id} value={emp.id}>{emp.name} ({emp.eid})</SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                    <input 
+                        type="month" 
+                        value={pendingMonthFilter} 
+                        onChange={e => setPendingMonthFilter(e.target.value)} 
+                        className="h-10 px-3 border border-gray-200 rounded-md text-sm bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-700 w-[180px]"
+                        title="Filter by month"
+                    />
+                    <Select value={pendingTypeFilter} onValueChange={setPendingTypeFilter}>
+                        <SelectTrigger className="w-[180px]">
+                            <SelectValue placeholder="All Types" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="All">All Types</SelectItem>
+                            <SelectItem value="Casual">Casual</SelectItem>
+                            <SelectItem value="Sick">Sick</SelectItem>
+                            <SelectItem value="Annual">Annual</SelectItem>
+                            <SelectItem value="Maternity">Maternity</SelectItem>
+                            <SelectItem value="Other">Other</SelectItem>
+                        </SelectContent>
+                    </Select>
+                </div>
+                
+                <div className="space-y-3">
+                    {(() => {
+                        const pendingLeaves = leaves.filter(l => l.status === 'Pending');
+                        const filtered = pendingLeaves.filter(leave => {
+                            const emp = employees.find(e => e.id === leave.employeeId);
+                            const matchesSearch = !pendingSearchQuery || 
+                                (emp?.name || '').toLowerCase().includes(pendingSearchQuery.toLowerCase()) || 
+                                (emp?.eid || '').toLowerCase().includes(pendingSearchQuery.toLowerCase());
+                            const matchesType = pendingTypeFilter === 'All' || leave.type === pendingTypeFilter;
+                            const matchesEmployee = pendingEmployeeFilter === 'All' || leave.employeeId === pendingEmployeeFilter;
+                            
+                            let matchesMonth = true;
+                            if (pendingMonthFilter) {
+                                const leaveStartMonth = leave.startDate.substring(0, 7);
+                                const leaveEndMonth = leave.endDate.substring(0, 7);
+                                matchesMonth = leaveStartMonth === pendingMonthFilter || leaveEndMonth === pendingMonthFilter;
+                            }
+                            
+                            return matchesSearch && matchesType && matchesEmployee && matchesMonth;
+                        });
+
+                        if (filtered.length === 0) {
+                            return (
+                                <div className="text-center py-10 text-gray-500 bg-gray-50 rounded-lg border border-dashed">
+                                    No pending leaves found matching your criteria.
+                                </div>
+                            );
+                        }
+
+                        return filtered.map(leave => {
+                            const emp = employees.find(e => e.id === leave.employeeId);
+                            return (
+                                <div key={leave.id} className="flex items-center justify-between gap-3 bg-white rounded-lg border border-amber-200 px-4 py-3">
+                                    <div className="flex-1 min-w-0">
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                            <span className="font-semibold text-sm">{emp?.name ?? 'Unknown'}</span>
+                                            <span className="text-xs text-gray-500">({emp?.eid})</span>
+                                            <Badge variant="outline" className="text-xs">{leave.type}</Badge>
+                                            <span className="text-xs text-gray-600">{leave.partialHours ? `${leave.partialHours} hour${leave.partialHours > 1 ? 's' : ''}` : `${leave.days} day${leave.days > 1 ? 's' : ''}`}</span>
+                                        </div>
+                                        <p className="text-xs text-gray-500 mt-0.5">
+                                            {format(parseISO(leave.startDate), 'MMM dd')} – {format(parseISO(leave.endDate), 'MMM dd, yyyy')} · <span className="italic">"{leave.reason}"</span>
+                                        </p>
+                                    </div>
+                                    <div className="flex items-center gap-2 shrink-0">
+                                        <Button
+                                            size="sm"
+                                            className="h-7 px-3 bg-green-600 hover:bg-green-700 text-white text-xs gap-1"
+                                            onClick={() => { updateLeave(leave.id, { status: 'Approved' }); toast.success(`Leave approved for ${emp?.name}`); }}
+                                        >
+                                            <Check className="h-3 w-3" /> Approve
+                                        </Button>
+                                        <Button
+                                            size="sm"
+                                            variant="outline"
+                                            className="h-7 px-3 text-red-600 border-red-300 hover:bg-red-50 text-xs gap-1"
+                                            onClick={() => { updateLeave(leave.id, { status: 'Rejected' }); toast.error(`Leave rejected for ${emp?.name}`); }}
+                                        >
+                                            <X className="h-3 w-3" /> Reject
+                                        </Button>
+                                    </div>
+                                </div>
+                            );
+                        });
+
+                    })()}
+                </div>
+            </CardContent>
+        </Card>
+      ) : null}
     </div>
   );
 };

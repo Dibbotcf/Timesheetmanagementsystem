@@ -11,7 +11,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { toast } from 'sonner@2.0.3';
-import { Plus, Clock, CheckCircle, XCircle, Trash2, Search, Calendar as CalendarIcon, Download, Printer, Save, Folder as FolderIcon, FileText, FolderOpen } from 'lucide-react';
+import { Plus, Clock, CheckCircle, XCircle, Trash2, Search, Calendar as CalendarIcon, Download, Printer, Save, Folder as FolderIcon, FileText, FolderOpen, Check, ChevronsUpDown } from 'lucide-react';
+import { Popover, PopoverContent, PopoverTrigger } from '../components/ui/popover';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '../components/ui/command';
 import { format, parseISO, startOfMonth, endOfMonth, subMonths, isSameMonth, isSameDay, lastDayOfMonth } from 'date-fns';
 
 // --- Sub-Components ---
@@ -61,9 +63,8 @@ const SignatureBlock = ({
     );
 };
 
-// 4. Records View (Folder Management)
 const RecordsView = () => {
-    const { reportFolders, savedReports, addReportFolder, deleteReportFolder, deleteSavedReport, getItem } = useAppStore();
+    const { reportFolders, savedReports, addReportFolder, deleteReportFolder, deleteSavedReport, getItem, employees } = useAppStore();
     const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
     const [isCreateFolderOpen, setIsCreateFolderOpen] = useState(false);
     const [newFolderName, setNewFolderName] = useState('');
@@ -96,7 +97,7 @@ const RecordsView = () => {
                     <h2 className="text-xl font-bold">Report: {viewReport.name}</h2>
                      <Button variant="outline" onClick={() => window.print()} className="ml-auto">
                         <Printer className="mr-2 h-4 w-4" /> Print Saved Report
-                    </Button>
+                     </Button>
                 </div>
                 {/* Reuse the visualization logic or a simplified version */}
                  <div className="bg-white p-8 min-h-[800px] shadow-lg border border-gray-200 w-full max-w-[210mm] mx-auto print:shadow-none print:border-none print:p-0">
@@ -117,15 +118,31 @@ const RecordsView = () => {
                                 </tr>
                             </thead>
                              <tbody className="divide-y divide-black">
-                                {viewReport.data.reportData.map((row: any, idx: number) => (
-                                    <tr key={row.id} className="divide-x divide-black">
-                                        <td className="p-2 text-center border-r border-black">{idx + 1}</td>
-                                        <td className="p-2 text-left border-r border-black font-medium">{row.name}</td>
-                                        <td className="p-2 text-right border-r border-black">{row.currentMonthOT > 0 ? row.currentMonthOT.toFixed(2) : ''}</td>
-                                        <td className="p-2 text-right border-r border-black">{row.prevMonthEndOT > 0 ? row.prevMonthEndOT.toFixed(2) : ''}</td>
-                                        <td className="p-2 text-right font-bold">{row.totalOT > 0 ? row.totalOT.toFixed(2) : '-'}</td>
-                                    </tr>
-                                ))}
+                                {(() => {
+                                    const sortedRows = [...viewReport.data.reportData].sort((a: any, b: any) => {
+                                        const empA = employees.find(e => e.id === a.id);
+                                        const empB = employees.find(e => e.id === b.id);
+                                        const eIdA = empA?.eid || '';
+                                        const eIdB = empB?.eid || '';
+                                        const parseEidNumber = (eid: string): number => {
+                                            const match = eid.match(/\d+/);
+                                            return match ? parseInt(match[0], 10) : Infinity;
+                                        };
+                                        const aNum = parseEidNumber(eIdA);
+                                        const bNum = parseEidNumber(eIdB);
+                                        if (aNum !== bNum) return aNum - bNum;
+                                        return eIdA.localeCompare(eIdB);
+                                    });
+                                    return sortedRows.map((row: any, idx: number) => (
+                                        <tr key={row.id} className="divide-x divide-black">
+                                            <td className="p-2 text-center border-r border-black">{idx + 1}</td>
+                                            <td className="p-2 text-left border-r border-black font-medium">{row.name}</td>
+                                            <td className="p-2 text-right border-r border-black">{row.currentMonthOT > 0 ? row.currentMonthOT.toFixed(2) : ''}</td>
+                                            <td className="p-2 text-right border-r border-black">{row.prevMonthEndOT > 0 ? row.prevMonthEndOT.toFixed(2) : ''}</td>
+                                            <td className="p-2 text-right font-bold">{row.totalOT > 0 ? row.totalOT.toFixed(2) : '-'}</td>
+                                        </tr>
+                                    ));
+                                })()}
                                 <tr className="font-bold text-black border-t-2 border-black divide-x divide-black bg-white">
                                     <td colSpan={2} className="p-2 text-center uppercase border-r border-black">Total</td>
                                     <td className="p-2 text-right border-r border-black">{viewReport.data.totals.current > 0 ? viewReport.data.totals.current.toFixed(2) : ''}</td>
@@ -271,6 +288,7 @@ const DailyView = ({
     date, 
     setDate, 
     onAddOT,
+    onEditOT,
     currentUser
 }: { 
     employees: Employee[], 
@@ -278,9 +296,11 @@ const DailyView = ({
     date: string, 
     setDate: (d: string) => void,
     onAddOT: (empId: string) => void,
+    onEditOT: (record: OTRecord) => void,
     currentUser: any
 }) => {
     const isStaff = currentUser?.role === 'Staff';
+    const [searchQuery, setSearchQuery] = useState('');
 
     const recordsForDate = useMemo(() => {
         let filtered = otRecords.filter(r => r.date === date);
@@ -291,9 +311,31 @@ const DailyView = ({
     }, [otRecords, date, isStaff, currentUser]);
 
     const employeeRows = useMemo(() => {
-        let targetEmployees = employees;
+        let targetEmployees = [...employees];
+        
+        targetEmployees.sort((a, b) => {
+            const eIdA = a.eid || '';
+            const eIdB = b.eid || '';
+            const parseEidNumber = (eid: string): number => {
+                const match = eid.match(/\d+/);
+                return match ? parseInt(match[0], 10) : Infinity;
+            };
+            const aNum = parseEidNumber(eIdA);
+            const bNum = parseEidNumber(eIdB);
+            if (aNum !== bNum) return aNum - bNum;
+            return eIdA.localeCompare(eIdB);
+        });
+
         if (isStaff) {
-            targetEmployees = employees.filter(e => e.id === currentUser.id);
+            targetEmployees = targetEmployees.filter(e => e.id === currentUser.id);
+        }
+        
+        if (searchQuery.trim()) {
+            const q = searchQuery.toLowerCase();
+            targetEmployees = targetEmployees.filter(e => 
+                (e.name || '').toLowerCase().includes(q) || 
+                (e.eid || '').toLowerCase().includes(q)
+            );
         }
         
         return targetEmployees.map(emp => {
@@ -303,7 +345,7 @@ const DailyView = ({
                 otRecord: record
             };
         });
-    }, [employees, recordsForDate, isStaff, currentUser]);
+    }, [employees, recordsForDate, isStaff, currentUser, searchQuery]);
 
     return (
         <div className="space-y-4">
@@ -316,9 +358,28 @@ const DailyView = ({
                         onChange={(e) => setDate(e.target.value)} 
                         className="w-48 bg-gray-50 border-0 [&::-webkit-calendar-picker-indicator]:filter-[brightness(0)_saturate(100%)] [&::-webkit-calendar-picker-indicator]:opacity-100"
                     />
+                    {date !== new Date().toISOString().split('T')[0] && (
+                        <Button variant="outline" size="sm" onClick={() => setDate(new Date().toISOString().split('T')[0])}>
+                            Back to Today
+                        </Button>
+                    )}
                 </div>
-                <div className="text-sm text-gray-500">
-                    Total OT: <span className="font-bold text-black">{recordsForDate.reduce((acc, r) => acc + r.hours, 0).toFixed(2)} hrs</span>
+
+                <div className="flex items-center gap-8 ml-auto">
+                    <div className="relative w-64">
+                        <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-500" />
+                        <Input
+                            type="text"
+                            placeholder="Search employee..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            className="pl-9 bg-gray-50 border-0"
+                        />
+                    </div>
+
+                    <div className="text-sm text-gray-500 whitespace-nowrap">
+                        Total OT: <span className="font-bold text-black">{recordsForDate.reduce((acc, r) => acc + r.hours, 0).toFixed(2)} hrs</span>
+                    </div>
                 </div>
             </div>
 
@@ -332,6 +393,7 @@ const DailyView = ({
                                 <TableHead>OT Status</TableHead>
                                 <TableHead>Hours</TableHead>
                                 <TableHead>Reason</TableHead>
+                                <TableHead>Submit Date</TableHead>
                                 <TableHead className="text-right">Action</TableHead>
                             </TableRow>
                         </TableHeader>
@@ -357,13 +419,16 @@ const DailyView = ({
                                     <TableCell className="max-w-[200px] truncate text-sm text-gray-500">
                                         {row.otRecord?.reason || ''}
                                     </TableCell>
+                                    <TableCell className="text-sm text-gray-500 whitespace-nowrap">
+                                        {row.otRecord?.submittedAt ? format(parseISO(row.otRecord.submittedAt), 'dd MMM yyyy, hh:mm a') : '-'}
+                                    </TableCell>
                                     <TableCell className="text-right">
                                         {!row.otRecord ? (
                                             <Button size="sm" variant="outline" onClick={() => onAddOT(row.id)}>
                                                 <Plus className="h-3 w-3 mr-1" /> Add OT
                                             </Button>
                                         ) : (
-                                            <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={() => onAddOT(row.id)}>
+                                            <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={() => onEditOT(row.otRecord!)}>
                                                 <Clock className="h-4 w-4 text-blue-600" />
                                             </Button>
                                         )}
@@ -402,15 +467,16 @@ const MonthlyPersonView = ({
 }) => {
     const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM
     const [selectedDate, setSelectedDate] = useState('');
-    const [selectedEmpId, setSelectedEmpId] = useState<string>(currentUser.role === 'Staff' ? currentUser.id : (employees[0]?.id || ''));
+    const [selectedEmpIds, setSelectedEmpIds] = useState<string[]>(currentUser.role === 'Staff' ? [currentUser.id] : ['all']);
+    const [openEmployeeSelect, setOpenEmployeeSelect] = useState(false);
 
     const filteredRecords = useMemo(() => {
         return otRecords.filter(r => {
-            const empMatch = selectedEmpId === 'all' ? true : r.employeeId === selectedEmpId;
+            const empMatch = selectedEmpIds.includes('all') ? true : selectedEmpIds.includes(r.employeeId);
             const dateMatch = selectedDate ? r.date === selectedDate : r.date.startsWith(selectedMonth);
             return empMatch && dateMatch;
         }).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-    }, [otRecords, selectedEmpId, selectedMonth, selectedDate]);
+    }, [otRecords, selectedEmpIds, selectedMonth, selectedDate]);
 
     const pendingRecords = useMemo(() => {
         return filteredRecords.filter(r => r.status === 'Pending');
@@ -420,65 +486,145 @@ const MonthlyPersonView = ({
 
     return (
         <div className="space-y-4">
-            <div className="flex flex-col md:flex-row gap-4 items-center bg-white p-4 rounded-lg border shadow-sm">
-                 <div className="flex items-center gap-2 w-full md:w-auto">
-                    <span className="text-sm font-medium whitespace-nowrap">Select Month:</span>
-                    <Input 
-                        type="month" 
-                        value={selectedMonth} 
-                        onChange={(e) => {
-                            setSelectedMonth(e.target.value);
-                            setSelectedDate(''); // Reset specific date when month changes
-                        }}
-                        className="bg-gray-50 border-0 [&::-webkit-calendar-picker-indicator]:filter-[brightness(0)_saturate(100%)] [&::-webkit-calendar-picker-indicator]:opacity-100"
-                    />
+            <div className="flex flex-col gap-3 bg-white p-4 rounded-lg border shadow-sm overflow-hidden">
+                {/* Row 1: Date filters */}
+                <div className="flex flex-wrap items-center gap-3">
+                    <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium whitespace-nowrap">Select Month:</span>
+                        <Input 
+                            type="month" 
+                            value={selectedMonth} 
+                            onChange={(e) => {
+                                setSelectedMonth(e.target.value);
+                                setSelectedDate(''); // Reset specific date when month changes
+                            }}
+                            className="bg-gray-50 border-0 [&::-webkit-calendar-picker-indicator]:filter-[brightness(0)_saturate(100%)] [&::-webkit-calendar-picker-indicator]:opacity-100"
+                        />
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium whitespace-nowrap">Or Date:</span>
+                        <Input 
+                            type="date" 
+                            value={selectedDate} 
+                            onChange={(e) => {
+                                setSelectedDate(e.target.value);
+                                if (e.target.value) {
+                                    setSelectedMonth(e.target.value.slice(0, 7));
+                                }
+                            }}
+                            className="bg-blue-50 border-2 border-blue-500 text-blue-900 font-medium shadow-sm [&::-webkit-calendar-picker-indicator]:filter-[brightness(0)_saturate(100%)] [&::-webkit-calendar-picker-indicator]:opacity-100"
+                        />
+                    </div>
                 </div>
-                <div className="flex items-center gap-2 w-full md:w-auto">
-                    <span className="text-sm font-medium whitespace-nowrap">Or Date:</span>
-                    <Input 
-                        type="date" 
-                        value={selectedDate} 
-                        onChange={(e) => {
-                            setSelectedDate(e.target.value);
-                            if (e.target.value) {
-                                // Optional: update selectedMonth to match the date's month
-                                setSelectedMonth(e.target.value.slice(0, 7));
-                            }
-                        }}
-                        className="bg-gray-50 border-0 [&::-webkit-calendar-picker-indicator]:filter-[brightness(0)_saturate(100%)] [&::-webkit-calendar-picker-indicator]:opacity-100"
-                    />
-                </div>
+                {/* Row 2: Employee select + actions */}
                 {currentUser.role !== 'Staff' && (
-                    <div className="flex items-center gap-2 w-full md:w-auto flex-1">
-                        <span className="text-sm font-medium whitespace-nowrap">Employee:</span>
-                        <Select value={selectedEmpId} onValueChange={setSelectedEmpId}>
-                            <SelectTrigger className="w-full bg-gray-50 border-0">
-                                <SelectValue placeholder="Select Employee" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="all">All Employees</SelectItem>
-                                {employees.map(e => (
-                                    <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
+                    <div className="flex flex-wrap items-center gap-3">
+                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                            <span className="text-sm font-medium whitespace-nowrap">Employee:</span>
+                            <div className="flex-1 min-w-0">
+                                <Popover open={openEmployeeSelect} onOpenChange={setOpenEmployeeSelect}>
+                                    <PopoverTrigger asChild>
+                                        <Button
+                                            variant="outline"
+                                            role="combobox"
+                                            aria-expanded={openEmployeeSelect}
+                                            className="w-full justify-between bg-white border border-gray-200 shadow-sm font-normal hover:bg-gray-50 text-left px-3 h-10"
+                                        >
+                                            <span className="truncate flex-1">
+                                            {selectedEmpIds.includes('all') 
+                                                ? "All Employees" 
+                                                : selectedEmpIds.length === 1
+                                                    ? employees.find(e => e.id === selectedEmpIds[0])?.name
+                                                    : `${selectedEmpIds.length} selected`}
+                                            </span>
+                                            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                        </Button>
+                                    </PopoverTrigger>
+                                    <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+                                        <Command>
+                                            <CommandInput placeholder="Search employee..." />
+                                            <CommandList>
+                                                <CommandEmpty>No employee found.</CommandEmpty>
+                                                <CommandGroup>
+                                                    <CommandItem
+                                                        key="all"
+                                                        value="All Employees"
+                                                        onSelect={() => {
+                                                            setSelectedEmpIds(['all']);
+                                                            setOpenEmployeeSelect(false);
+                                                        }}
+                                                    >
+                                                        <Check
+                                                            className={`mr-2 h-4 w-4 ${selectedEmpIds.includes('all') ? "opacity-100" : "opacity-0"}`}
+                                                        />
+                                                        All Employees
+                                                    </CommandItem>
+                                                    {([...employees].sort((a, b) => {
+                                                        const eIdA = a.eid || '';
+                                                        const eIdB = b.eid || '';
+                                                        const parseEidNumber = (eid: string): number => {
+                                                            const match = eid.match(/\d+/);
+                                                            return match ? parseInt(match[0], 10) : Infinity;
+                                                        };
+                                                        const aNum = parseEidNumber(eIdA);
+                                                        const bNum = parseEidNumber(eIdB);
+                                                        if (aNum !== bNum) return aNum - bNum;
+                                                        return eIdA.localeCompare(eIdB);
+                                                    })).map((emp) => (
+                                                        <CommandItem
+                                                            key={emp.id}
+                                                            value={emp.name}
+                                                            onSelect={() => {
+                                                                setSelectedEmpIds(prev => {
+                                                                    const newIds = prev.includes('all') ? [] : [...prev];
+                                                                    if (newIds.includes(emp.id)) {
+                                                                        const filtered = newIds.filter(id => id !== emp.id);
+                                                                        return filtered.length === 0 ? ['all'] : filtered;
+                                                                    } else {
+                                                                        return [...newIds, emp.id];
+                                                                    }
+                                                                });
+                                                            }}
+                                                        >
+                                                            <Check
+                                                                className={`mr-2 h-4 w-4 ${!selectedEmpIds.includes('all') && selectedEmpIds.includes(emp.id) ? "opacity-100" : "opacity-0"}`}
+                                                            />
+                                                            {emp.name}
+                                                        </CommandItem>
+                                                    ))}
+                                                </CommandGroup>
+                                            </CommandList>
+                                        </Command>
+                                    </PopoverContent>
+                                </Popover>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-3 shrink-0">
+                            {pendingRecords.length > 0 && (
+                                <Button 
+                                    size="sm" 
+                                    className="bg-green-600 hover:bg-green-700 text-white gap-2 shrink-0"
+                                    onClick={() => onApproveAll(pendingRecords)}
+                                >
+                                    <CheckCircle className="h-4 w-4" /> Approve All
+                                </Button>
+                            )}
+                            <div className="bg-blue-50 text-blue-700 px-4 py-2 rounded-md font-medium whitespace-nowrap">
+                                Total: {totalHours.toFixed(2)} hrs
+                            </div>
+                        </div>
                     </div>
                 )}
-                
-                {currentUser.role !== 'Staff' && pendingRecords.length > 0 && (
-                     <Button 
-                        size="sm" 
-                        className="bg-green-600 hover:bg-green-700 text-white gap-2"
-                        onClick={() => onApproveAll(pendingRecords)}
-                     >
-                        <CheckCircle className="h-4 w-4" /> Approve All
-                     </Button>
+                {/* For Staff: just show total */}
+                {currentUser.role === 'Staff' && (
+                    <div className="flex justify-end">
+                        <div className="bg-blue-50 text-blue-700 px-4 py-2 rounded-md font-medium">
+                            Total: {totalHours.toFixed(2)} hrs
+                        </div>
+                    </div>
                 )}
-
-                <div className="ml-auto bg-blue-50 text-blue-700 px-4 py-2 rounded-md font-medium">
-                    Total: {totalHours.toFixed(2)} hrs
-                </div>
             </div>
+
 
             <Card>
                 <CardContent className="p-0">
@@ -486,7 +632,7 @@ const MonthlyPersonView = ({
                         <TableHeader>
                             <TableRow>
                                 <TableHead>Date</TableHead>
-                                {(selectedEmpId === 'all' || currentUser.role !== 'Staff') && <TableHead>Employee</TableHead>}
+                                {(selectedEmpIds.includes('all') || currentUser.role !== 'Staff') && <TableHead>Employee</TableHead>}
                                 <TableHead>Day</TableHead>
                                 <TableHead>Time In</TableHead>
                                 <TableHead>Time Out</TableHead>
@@ -507,7 +653,7 @@ const MonthlyPersonView = ({
                                 filteredRecords.map(r => (
                                     <TableRow key={r.id}>
                                         <TableCell className="font-medium">{format(parseISO(r.date), 'dd MMM yyyy')}</TableCell>
-                                        {(selectedEmpId === 'all' || currentUser.role !== 'Staff') && <TableCell className="font-medium">{r.employeeName || 'Unknown'}</TableCell>}
+                                        {(selectedEmpIds.includes('all') || currentUser.role !== 'Staff') && <TableCell className="font-medium">{r.employeeName || 'Unknown'}</TableCell>}
                                         <TableCell className="text-gray-500">{format(parseISO(r.date), 'EEEE')}</TableCell>
                                         <TableCell>{r.startTime}</TableCell>
                                         <TableCell>{r.endTime}</TableCell>
@@ -555,7 +701,7 @@ const MonthlyPersonView = ({
 };
 
 // 3. Summary Report View
-const SummaryReportView = ({
+export const SummaryReportView = ({
     employees,
     otRecords
 }: {
@@ -574,7 +720,7 @@ const SummaryReportView = ({
     }, [selectedMonth]);
 
     const reportData = useMemo(() => {
-        return employees.map(emp => {
+        const data = employees.map(emp => {
             // 1. Current Month OT (Sum of hours in selected month)
             const currentMonthOT = otRecords
                 .filter(r => r.employeeId === emp.id && r.date.startsWith(selectedMonth) && r.status === 'Approved')
@@ -591,11 +737,25 @@ const SummaryReportView = ({
             return {
                 id: emp.id,
                 name: emp.name,
+                eid: emp.eid || '',
                 currentMonthOT,
                 prevMonthEndOT,
                 totalOT
             };
         }).filter(d => d.totalOT > 0 || true); 
+
+        // Sort by Employee ID (eid) numeric representation
+        const parseEidNumber = (eid: string): number => {
+            const match = eid.match(/\d+/);
+            return match ? parseInt(match[0], 10) : Infinity;
+        };
+
+        return data.sort((a, b) => {
+            const aNum = parseEidNumber(a.eid);
+            const bNum = parseEidNumber(b.eid);
+            if (aNum !== bNum) return aNum - bNum;
+            return a.eid.localeCompare(b.eid);
+        });
     }, [employees, otRecords, selectedMonth, customPrevDate]);
 
     const prevDateMonthName = customPrevDate ? format(parseISO(customPrevDate), 'MMMM') : '';
@@ -903,6 +1063,8 @@ export const OTManagement: React.FC = () => {
   // State
   const [activeTab, setActiveTab] = useState('daily');
   const [isAddOpen, setIsAddOpen] = useState(false);
+  const [dailyViewDate, setDailyViewDate] = useState(new Date().toISOString().split('T')[0]);
+  const [editingRecordId, setEditingRecordId] = useState<string | null>(null);
   
   // Form State
   const [formData, setFormData] = useState<Partial<OTRecord>>({
@@ -929,36 +1091,66 @@ export const OTManagement: React.FC = () => {
   };
 
   const handleSubmit = () => {
-    if (!formData.date || !formData.startTime || !formData.endTime || !formData.reason) {
-        toast.error("Please fill in all fields");
+    if (!isStaff && !formData.employeeId) {
+        toast.error("Please select an employee");
         return;
     }
-    const targetEmployeeId = formData.employeeId || currentUser?.id;
-    const targetEmployeeName = employees.find(e => e.id === targetEmployeeId)?.name || currentUser?.name;
+    if (!formData.date || formData.hours === undefined || (formData.hours > 0 && !formData.reason)) {
+        toast.error("Please fill in all required fields");
+        return;
+    }
+    
+    if (editingRecordId) {
+        updateOTRecord(editingRecordId, {
+            hours: formData.hours || 0,
+            reason: formData.hours === 0 ? '' : formData.reason,
+            status: 'Pending'
+        });
+        toast.success("OT Claim updated successfully");
+    } else {
+        const targetEmployeeId = formData.employeeId || currentUser?.id;
+        const targetEmployeeName = employees.find(e => e.id === targetEmployeeId)?.name || currentUser?.name;
 
-    addOTRecord({
-        employeeId: targetEmployeeId,
-        employeeName: targetEmployeeName,
-        date: formData.date,
-        startTime: formData.startTime,
-        endTime: formData.endTime,
-        hours: formData.hours || 0,
-        reason: formData.reason,
-        status: 'Pending' // Default to pending
-    });
+        addOTRecord({
+            employeeId: targetEmployeeId,
+            employeeName: targetEmployeeName,
+            date: formData.date,
+            startTime: '-',
+            endTime: '-',
+            hours: formData.hours || 0,
+            reason: formData.hours === 0 ? '' : formData.reason,
+            status: 'Pending', // Default to pending
+            submittedAt: new Date().toISOString()
+        });
+        toast.success("OT Claim submitted successfully");
+    }
 
-    toast.success("OT Claim submitted successfully");
     setIsAddOpen(false);
+    setEditingRecordId(null);
   };
 
   const handleOpenAdd = (preSelectedEmpId?: string) => {
+      setEditingRecordId(null);
       setFormData({
-        date: new Date().toISOString().split('T')[0],
+        date: dailyViewDate,
         employeeId: preSelectedEmpId || currentUser?.id || '',
-        startTime: '',
-        endTime: '',
+        startTime: '-',
+        endTime: '-',
         hours: 0,
         reason: ''
+      });
+      setIsAddOpen(true);
+  };
+
+  const handleEditOT = (record: OTRecord) => {
+      setEditingRecordId(record.id);
+      setFormData({
+        date: record.date,
+        employeeId: record.employeeId,
+        startTime: record.startTime,
+        endTime: record.endTime,
+        hours: record.hours,
+        reason: record.reason
       });
       setIsAddOpen(true);
   };
@@ -1024,9 +1216,10 @@ export const OTManagement: React.FC = () => {
                     <DailyView 
                         employees={employees} 
                         otRecords={otRecords} 
-                        date={formData.date || new Date().toISOString().split('T')[0]}
-                        setDate={(d) => setFormData({...formData, date: d})}
+                        date={dailyViewDate}
+                        setDate={setDailyViewDate}
                         onAddOT={(empId) => handleOpenAdd(empId)}
+                        onEditOT={handleEditOT}
                         currentUser={currentUser}
                     />
                 </TabsContent>
@@ -1069,7 +1262,7 @@ export const OTManagement: React.FC = () => {
                 <div className="space-y-4 py-4">
                      {!isStaff && (
                         <div className="space-y-2">
-                            <label className="text-sm font-medium">Employee</label>
+                            <label className="text-sm font-medium">Employee <span className="text-red-500">*</span></label>
                             <Select 
                                 value={formData.employeeId} 
                                 onValueChange={(val) => setFormData({...formData, employeeId: val})}
@@ -1087,7 +1280,7 @@ export const OTManagement: React.FC = () => {
                     )}
 
                     <div className="space-y-2">
-                        <label className="text-sm font-medium">Date</label>
+                        <label className="text-sm font-medium">Date <span className="text-red-500">*</span></label>
                         <Input 
                             type="date" 
                             value={formData.date} 
@@ -1095,48 +1288,37 @@ export const OTManagement: React.FC = () => {
                             className="bg-gray-50 border-0 [&::-webkit-calendar-picker-indicator]:filter-[brightness(0)_saturate(100%)] [&::-webkit-calendar-picker-indicator]:opacity-100"
                         />
                     </div>
-                    <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                            <label className="text-sm font-medium">Start Time</label>
-                            <div className="relative">
-                                <Input 
-                                    type="time" 
-                                    value={formData.startTime} 
-                                    onChange={e => handleTimeChange('startTime', e.target.value)} 
-                                    className="bg-gray-50 border-0 w-full [&::-webkit-calendar-picker-indicator]:filter-[brightness(0)_saturate(100%)] [&::-webkit-calendar-picker-indicator]:opacity-100"
-                                />
-                            </div>
-                        </div>
-                        <div className="space-y-2">
-                            <label className="text-sm font-medium">End Time</label>
-                            <div className="relative">
-                                <Input 
-                                    type="time" 
-                                    value={formData.endTime} 
-                                    onChange={e => handleTimeChange('endTime', e.target.value)} 
-                                    className="bg-gray-50 border-0 w-full [&::-webkit-calendar-picker-indicator]:filter-[brightness(0)_saturate(100%)] [&::-webkit-calendar-picker-indicator]:opacity-100"
-                                />
-                            </div>
+                    <div className="space-y-2">
+                        <label className="text-sm font-medium text-gray-900">Select OT Hour</label>
+                        <div className="flex flex-wrap gap-3">
+                            {[0, 1, 1.5, 2].map((h) => (
+                                <button
+                                    key={h}
+                                    type="button"
+                                    onClick={() => setFormData({ ...formData, hours: h, reason: h === 0 ? '' : formData.reason })}
+                                    className={`px-4 py-2 rounded-md border text-sm font-medium transition-colors ${
+                                        formData.hours === h
+                                            ? 'text-white'
+                                            : 'bg-white text-gray-900 border-gray-200 hover:bg-gray-50'
+                                    }`}
+                                    style={formData.hours === h ? { backgroundColor: '#0036A3', borderColor: '#0036A3' } : {}}
+                                >
+                                    {h} {h === 1 || h === 0 ? 'Hour' : 'Hours'}
+                                </button>
+                            ))}
                         </div>
                     </div>
-                    <div className="space-y-2">
-                         <label className="text-sm font-medium">Total Hours</label>
-                         <Input 
-                            type="number" 
-                            value={formData.hours} 
-                            disabled 
-                            className="bg-white border-0 text-gray-900 font-bold pl-0" 
-                         />
-                    </div>
-                    <div className="space-y-2">
-                        <label className="text-sm font-medium">Reason / Task</label>
-                        <Textarea 
-                            placeholder="Describe work done..." 
-                            value={formData.reason}
-                            onChange={e => setFormData({...formData, reason: e.target.value})}
-                            className="bg-gray-50 border-0 min-h-[100px]"
-                        />
-                    </div>
+                    {formData.hours !== 0 && (
+                        <div className="space-y-2">
+                            <label className="text-sm font-medium text-gray-900">Reason / Task <span className="text-red-500">*</span></label>
+                            <Textarea 
+                                placeholder="Describe work done..." 
+                                value={formData.reason}
+                                onChange={e => setFormData({...formData, reason: e.target.value})}
+                                className="bg-gray-50 border-0 min-h-[100px]"
+                            />
+                        </div>
+                    )}
                 </div>
                 <DialogFooter>
                     <Button onClick={handleSubmit} className="bg-black hover:bg-gray-800 text-white">Submit Claim</Button>
