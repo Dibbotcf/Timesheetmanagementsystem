@@ -1,0 +1,48 @@
+name: Deploy to cPanel
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  web-deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    steps:
+    - name: Get latest code
+      uses: actions/checkout@v3
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '20'
+
+    - name: Install Dependencies
+      run: npm install
+
+    - name: Build React App
+      run: npm run build
+      env:
+        VITE_API_URL: "https://hrm.tcfbd.com/api"
+
+    - name: Prepare Deployment Folder
+      run: |
+        mkdir deployment
+        cp -r dist/* deployment/
+        mkdir -p deployment/api
+        cp -r php_server/* deployment/api/
+        echo "VITE_API_URL=https://hrm.tcfbd.com/api" > deployment/.env
+        echo "DB_HOST=localhost" >> deployment/.env
+        echo "DB_USER=${{ secrets.DB_USER }}" >> deployment/.env
+        echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" >> deployment/.env
+        echo "DB_NAME=${{ secrets.DB_NAME }}" >> deployment/.env
+        
+    - name: Sync files to cPanel FTP
+      uses: SamKirkland/FTP-Deploy-Action@v4.3.4
+      with:
+        server: ${{ secrets.FTP_SERVER }}
+        username: ${{ secrets.FTP_USERNAME }}
+        password: ${{ secrets.FTP_PASSWORD }}
+        server-dir: hrm.tcfbd.com/
+        local-dir: ./deployment/
