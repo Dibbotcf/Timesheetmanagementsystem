@@ -192,13 +192,26 @@ if ($parts[0] === 'items') {
 }
 
 if ($parts[0] === 'backups') {
-    if ($parts[1] ?? '' === 'data') {
-        // Download backup logic TBD or reuse endpoint structure
-        // The node app has /api/backups/data?path=...
-        // This is getting nested, let's keep it simple
+    if (isset($parts[1]) && $parts[1] === 'data') {
+        if ($method === 'GET') {
+            $path = $_GET['path'] ?? '';
+            if (!$path) {
+                http_response_code(400); echo json_encode(['error' => 'Path required']); exit;
+            }
+            global $pdo;
+            $stmt = $pdo->prepare("SELECT content FROM backups WHERE name = ?");
+            $stmt->execute([$path]);
+            $backup = $stmt->fetchColumn();
+            if ($backup) {
+                echo $backup;
+            } else {
+                http_response_code(404); echo json_encode(['error' => 'Backup not found']);
+            }
+            exit;
+        }
     }
     
-    if ($method === 'GET') {
+    if ($method === 'GET' && !isset($parts[1])) {
         // List backups
         global $pdo;
          try {
