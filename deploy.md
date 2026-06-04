@@ -1,6 +1,8 @@
 # Deployment & CI/CD Documentation
 
-This document explains the steps taken to successfully deploy the Timesheet Management System to the live cPanel server (`hrm.tcfbd.com`), including the database import, routing fixes, and the setup of the automated GitHub Actions CI/CD pipeline.
+This document explains the deployment setup for the Timesheet Management System at `hrm.tcfbd.com`, including credentials, the CI/CD pipeline, and a changelog of all deployments.
+
+---
 
 ## 1. Credentials
 
@@ -17,27 +19,98 @@ This document explains the steps taken to successfully deploy the Timesheet Mana
 
 ---
 
-## 2. Initial Manual Deployment & Database Sync
+## 2. GitHub Repository
 
-To get the site live immediately without waiting for GitHub Actions secrets to be configured, the following steps were performed manually via automated local scripts:
-
-1. **Building the App:** The React frontend was built locally using `npm run build` to generate the static `dist/` folder.
-2. **Environment Configuration:** A production `.env` file was dynamically generated containing the database credentials above and the live API URL (`https://hrm.tcfbd.com/api`).
-3. **Database Import:** 
-   - A custom PHP script (`import_db.php`) was created.
-   - This script and the SQL dumps (`kv_store.sql` and `backups.sql`) were uploaded to the cPanel server via FTP.
-   - The script was executed via a web request to securely inject the 168 rows of data into the `tcfbdcom_hrm` database.
-   - The script automatically deleted itself and the SQL files afterward for security.
-4. **FTP Upload:** The entire `dist/` folder, the `php_server/` folder (renamed to `api/`), and the `.env` file were uploaded via a Node.js FTP script directly to the `hrm.tcfbd.com` directory on cPanel.
+- **Repo:** https://github.com/Dibbotcf/Timesheetmanagementsystem
+- **Deploy Branch:** `main`
+- **GitHub Actions:** https://github.com/Dibbotcf/Timesheetmanagementsystem/actions
 
 ---
 
-## 3. Fixing the React SPA Routing (404 Error on Refresh)
+## 3. CI/CD Pipeline (GitHub Actions) — ✅ FULLY OPERATIONAL
 
-A common issue with React Single Page Applications on Apache servers is that refreshing the page (e.g., `https://hrm.tcfbd.com/templates`) results in a 404 Not Found error. This happens because the server looks for a literal folder named `templates`, rather than passing the route to React.
+> **Status as of 4 Jun 2026:** All GitHub Secrets are configured and the pipeline is live. Every push to `main` automatically builds and deploys to cPanel.
 
-**The Fix:**
-An `.htaccess` file was created in the `public/` directory with the following Rewrite rules:
+### How It Works
+1. Push code to the `main` branch on GitHub.
+2. GitHub Actions triggers automatically.
+3. It runs `npm install` → `npm run build` (Vite production build).
+4. Prepares the deployment folder: `dist/` + `php_server/` (as `api/`) + production `.env`.
+5. Uploads all files to `hrm.tcfbd.com/` via FTP using `SamKirkland/FTP-Deploy-Action`.
+
+### GitHub Secrets (All Configured ✅)
+
+| Secret Name   | Value                   | Purpose                      |
+|---------------|-------------------------|------------------------------|
+| `FTP_SERVER`  | `b216.serverdiana.com`  | cPanel FTP host              |
+| `FTP_USERNAME`| `tcfbdcom`              | cPanel FTP username          |
+| `FTP_PASSWORD`| `KJJH*uy^5rt4@y2`       | cPanel FTP password          |
+| `DB_USER`     | `tcfbdcom_hrm`          | MySQL database username      |
+| `DB_PASSWORD` | `iYC.H5C0rxp&b%Wu`      | MySQL database password      |
+| `DB_NAME`     | `tcfbdcom_hrm`          | MySQL database name          |
+
+> To update secrets: Go to **GitHub Repo → Settings → Secrets and variables → Actions**.
+
+### Workflow File
+Located at: `.github/workflows/deploy.yml`
+
+```yaml
+name: Deploy to cPanel
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  web-deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    steps:
+    - name: Get latest code
+      uses: actions/checkout@v3
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '20'
+
+    - name: Install Dependencies
+      run: npm install
+
+    - name: Build React App
+      run: npm run build
+      env:
+        VITE_API_URL: "https://hrm.tcfbd.com/api"
+
+    - name: Prepare Deployment Folder
+      run: |
+        mkdir deployment
+        cp -r dist/* deployment/
+        mkdir -p deployment/api
+        cp -r php_server/* deployment/api/
+        echo "VITE_API_URL=https://hrm.tcfbd.com/api" > deployment/.env
+        echo "DB_HOST=localhost" >> deployment/.env
+        echo "DB_USER=${{ secrets.DB_USER }}" >> deployment/.env
+        echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" >> deployment/.env
+        echo "DB_NAME=${{ secrets.DB_NAME }}" >> deployment/.env
+
+    - name: Sync files to cPanel FTP
+      uses: SamKirkland/FTP-Deploy-Action@v4.3.4
+      with:
+        server: ${{ secrets.FTP_SERVER }}
+        username: ${{ secrets.FTP_USERNAME }}
+        password: ${{ secrets.FTP_PASSWORD }}
+        server-dir: hrm.tcfbd.com/
+        local-dir: ./deployment/
+```
+
+---
+
+## 4. React SPA Routing Fix (.htaccess)
+
+A `.htaccess` file lives in `public/` to fix 404 errors on page refresh in Apache:
+
 ```apache
 <IfModule mod_rewrite.c>
   RewriteEngine On
@@ -48,25 +121,28 @@ An `.htaccess` file was created in the `public/` directory with the following Re
   RewriteRule . /index.html [L]
 </IfModule>
 ```
-This forces the server to redirect all requests for non-existent files/folders back to `index.html`, allowing React Router to handle the URL correctly. This file is now permanently part of the codebase.
 
 ---
 
-## 4. GitHub Actions CI/CD Pipeline Setup
+## 5. How to Deploy (Standard Workflow)
 
-To ensure future updates are automatically deployed, a CI/CD pipeline was created in `.github/workflows/deploy.yml`.
+```bash
+# 1. Make your code changes locally
+# 2. Stage and commit
+git add <changed files>
+git commit -m "your commit message"
 
-### How It Works:
-1. Whenever code is pushed to the `main` branch on GitHub, the pipeline triggers.
-2. It automatically runs `npm install` and `npm run build` to compile the React code.
-3. It creates the production deployment folder and generates the production `.env` file securely using GitHub Secrets.
-4. It uses the `SamKirkland/FTP-Deploy-Action` to automatically upload the updated files to `hrm.tcfbd.com` on your cPanel.
+# 3. Push to main — GitHub Actions handles the rest automatically
+git push origin main
+```
 
-### IMPORTANT: Required GitHub Secrets
-For the automated pipeline to work on future updates, you must add your FTP credentials to your GitHub repository securely. 
-1. Go to your repository on GitHub.
-2. Navigate to **Settings > Secrets and variables > Actions**.
-3. Click **New repository secret** and add the following three secrets:
-   - **Name:** `FTP_PASSWORD` | **Secret:** `KJJH*uy^5rt4@y2`
-   - **Name:** `FTP_USERNAME` | **Secret:** `tcfbdcom`
-   - **Name:** `FTP_SERVER`   | **Secret:** `b216.serverdiana.com`
+Check deployment progress at: https://github.com/Dibbotcf/Timesheetmanagementsystem/actions
+
+---
+
+## 6. Deployment Changelog
+
+| Date         | Commit      | Description                                                                                     |
+|--------------|-------------|-------------------------------------------------------------------------------------------------|
+| 4 Jun 2026   | `ee6b075`   | feat(timesheet): OT hours in date rows, auto-fill HR Comments (Row 07 & 09), fix last working day calculation using prev month template |
+| *(earlier)*  | `1024eda`   | Initial CI/CD pipeline setup, database import, FTP upload, SPA routing fix                     |
