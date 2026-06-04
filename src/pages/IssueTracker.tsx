@@ -213,58 +213,58 @@ export const IssueTracker: React.FC = () => {
         ) : (
           filteredIssues.map((issue) => (
             <Card key={issue.id} className={`transition-all hover:shadow-sm ${issue.status === 'Resolved' ? 'bg-gray-50/50' : 'border-l-4 border-l-blue-500'}`}>
-              <CardHeader className="pb-3">
-                <div className="flex justify-between items-start gap-4">
+              <CardHeader className="p-4 pb-2">
+                <div className="flex justify-between items-start gap-3">
                   <div>
                     <div className="flex items-center gap-2 mb-1">
-                      <Badge variant="outline" className={getPriorityColor(issue.priority)}>
+                      <Badge variant="outline" className={`px-1.5 py-0 text-[10px] ${getPriorityColor(issue.priority)}`}>
                         {issue.priority}
                       </Badge>
-                      <Badge variant={issue.status === 'Open' ? 'default' : 'secondary'} className={issue.status === 'Open' ? 'bg-blue-600' : 'bg-gray-200 text-gray-700'}>
+                      <Badge variant={issue.status === 'Open' ? 'default' : 'secondary'} className={`px-1.5 py-0 text-[10px] ${issue.status === 'Open' ? 'bg-blue-600' : 'bg-gray-200 text-gray-700'}`}>
                         {issue.status}
                       </Badge>
-                      <span className="text-xs text-muted-foreground flex items-center gap-1 ml-2">
+                      <span className="text-[11px] text-muted-foreground flex items-center gap-1 ml-1">
                         <Clock className="h-3 w-3" />
                         {format(new Date(issue.createdAt), 'MMM dd, yyyy HH:mm')}
                       </span>
                     </div>
-                    <CardTitle className="text-lg font-bold text-gray-900 mt-2">
+                    <CardTitle className="text-base font-bold text-gray-900 mt-1">
                       {issue.title}
                     </CardTitle>
-                    <CardDescription className="flex items-center gap-2 mt-1">
+                    <CardDescription className="flex items-center gap-1 mt-0.5 text-xs">
                       Reported by <span className="font-medium text-gray-900">{issue.employeeName}</span>
                     </CardDescription>
                   </div>
 
                   {isAdmin && (
-                    <div className="flex flex-col gap-2 shrink-0 items-end">
+                    <div className="flex flex-row gap-2 shrink-0 items-center">
                       {issue.status === 'Open' && (
                         <Button
                           size="sm"
-                          className="bg-green-600 hover:bg-green-700 text-white gap-2 w-full md:w-auto"
+                          className="h-7 text-xs px-2 bg-green-600 hover:bg-green-700 text-white gap-1"
                           onClick={() => handleResolve(issue.id)}
                         >
-                          <CheckCircle className="h-4 w-4" /> Mark Resolved
+                          <CheckCircle className="h-3 w-3" /> Resolve
                         </Button>
                       )}
                       <Button
                         size="sm"
                         variant="destructive"
-                        className="gap-2 w-full md:w-auto"
+                        className="h-7 text-xs px-2 gap-1"
                         onClick={() => handleDelete(issue.id)}
                       >
-                        <Trash2 className="h-4 w-4" /> Delete
+                        <Trash2 className="h-3 w-3" /> Delete
                       </Button>
                     </div>
                   )}
 
                   {!isAdmin && issue.status === 'Resolved' && (
                     <div className="flex flex-col items-end">
-                      <div className="flex items-center text-green-600 text-sm font-medium gap-1 bg-green-50 px-2 py-1 rounded border border-green-100">
+                      <div className="flex items-center text-green-600 text-xs font-medium gap-1 bg-green-50 px-2 py-0.5 rounded border border-green-100">
                         <CheckCircle className="h-3 w-3" /> Resolved
                       </div>
                       {issue.resolvedAt && (
-                        <span className="text-xs text-muted-foreground mt-1">
+                        <span className="text-[10px] text-muted-foreground mt-0.5">
                           {format(new Date(issue.resolvedAt), 'MMM dd, HH:mm')}
                         </span>
                       )}
@@ -272,12 +272,12 @@ export const IssueTracker: React.FC = () => {
                   )}
 
                   {isAdmin && issue.status === 'Resolved' && (
-                    <div className="flex flex-col items-end mb-2">
-                      <div className="flex items-center text-green-600 text-sm font-medium gap-1 bg-green-50 px-2 py-1 rounded border border-green-100">
+                    <div className="flex flex-col items-end">
+                      <div className="flex items-center text-green-600 text-xs font-medium gap-1 bg-green-50 px-2 py-0.5 rounded border border-green-100">
                         <CheckCircle className="h-3 w-3" /> Resolved
                       </div>
                       {issue.resolvedAt && (
-                        <span className="text-xs text-muted-foreground mt-1">
+                        <span className="text-[10px] text-muted-foreground mt-0.5">
                           {format(new Date(issue.resolvedAt), 'MMM dd, HH:mm')}
                         </span>
                       )}
@@ -285,7 +285,7 @@ export const IssueTracker: React.FC = () => {
                   )}
                 </div>
               </CardHeader>
-              <CardContent>
+              <CardContent className="p-4 pt-1">
                 <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
                   {issue.description}
                 </p>
