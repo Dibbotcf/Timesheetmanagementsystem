@@ -634,8 +634,7 @@ const MonthlyPersonView = ({
                                 <TableHead>Date</TableHead>
                                 {(selectedEmpIds.includes('all') || currentUser.role !== 'Staff') && <TableHead>Employee</TableHead>}
                                 <TableHead>Day</TableHead>
-                                <TableHead>Time In</TableHead>
-                                <TableHead>Time Out</TableHead>
+                                <TableHead>Submission Time</TableHead>
                                 <TableHead>Hours</TableHead>
                                 <TableHead>Task/Reason</TableHead>
                                 <TableHead>Status</TableHead>
@@ -655,8 +654,9 @@ const MonthlyPersonView = ({
                                         <TableCell className="font-medium">{format(parseISO(r.date), 'dd MMM yyyy')}</TableCell>
                                         {(selectedEmpIds.includes('all') || currentUser.role !== 'Staff') && <TableCell className="font-medium">{r.employeeName || 'Unknown'}</TableCell>}
                                         <TableCell className="text-gray-500">{format(parseISO(r.date), 'EEEE')}</TableCell>
-                                        <TableCell>{r.startTime}</TableCell>
-                                        <TableCell>{r.endTime}</TableCell>
+                                        <TableCell className="text-sm text-gray-500 whitespace-nowrap">
+                                            {r.submittedAt ? format(parseISO(r.submittedAt), 'dd MMM yyyy, hh:mm a') : '-'}
+                                        </TableCell>
                                         <TableCell className="font-bold">{r.hours.toFixed(2)}</TableCell>
                                         <TableCell className="max-w-[200px] truncate">{r.reason}</TableCell>
                                         <TableCell>
