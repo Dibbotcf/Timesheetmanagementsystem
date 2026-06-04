@@ -86,16 +86,32 @@ export const TimesheetView: React.FC = () => {
     return map;
   }, [timesheet, otRecords]);
 
-  const prevMonthEndOT = useMemo((): number => {
-    if (!timesheet) return 0;
+  // Find the true last WORKING day of the previous month (respects that month's template)
+  const prevLastWorkingDayStr = useMemo((): string => {
+    if (!timesheet) return '';
     const prevMonthIndex = timesheet.month === 0 ? 11 : timesheet.month - 1;
     const prevYear = timesheet.month === 0 ? timesheet.year - 1 : timesheet.year;
+    const prevTemplate = getTemplate(prevYear, prevMonthIndex);
+    const daysInPrevMonth = new Date(prevYear, prevMonthIndex + 1, 0).getDate();
+    for (let day = daysInPrevMonth; day >= 1; day--) {
+      const d = new Date(prevYear, prevMonthIndex, day);
+      const isWeekend = prevTemplate ? false : (d.getDay() === 5 || d.getDay() === 6);
+      const holiday = prevTemplate?.holidays?.find(h => h.date === day);
+      if (!isWeekend && !holiday) {
+        return `${prevYear}-${String(prevMonthIndex + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      }
+    }
+    // Fallback: last calendar day
     const lastDay = new Date(prevYear, prevMonthIndex + 1, 0).getDate();
-    const prevLastDayStr = `${prevYear}-${String(prevMonthIndex + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+    return `${prevYear}-${String(prevMonthIndex + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+  }, [timesheet, getTemplate]);
+
+  const prevMonthEndOT = useMemo((): number => {
+    if (!timesheet || !prevLastWorkingDayStr) return 0;
     return otRecords
-      .filter(r => r.employeeId === timesheet.employeeId && r.date === prevLastDayStr && r.status === 'Approved')
+      .filter(r => r.employeeId === timesheet.employeeId && r.date === prevLastWorkingDayStr && r.status === 'Approved')
       .reduce((sum, r) => sum + r.hours, 0);
-  }, [timesheet, otRecords]);
+  }, [timesheet, otRecords, prevLastWorkingDayStr]);
 
   // Determine the last working day of the current month (to exclude its OT from the monthly sum)
   const lastWorkingDay = useMemo((): number | null => {
@@ -559,6 +575,7 @@ export const TimesheetView: React.FC = () => {
                     defaultClockOut={displayTimesheet.defaultClockOut || '17:30'}
                     otByDay={otByDay}
                     prevMonthEndOT={prevMonthEndOT}
+                    prevLastWorkingDayStr={prevLastWorkingDayStr}
                     totalOT={totalOT}
                     leavesByDay={leavesByDay}
                     leaveSummary={leaveSummary}

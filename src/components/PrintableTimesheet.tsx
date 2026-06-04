@@ -189,6 +189,8 @@ interface Props {
     attendanceLateByDay?: Record<number, number>;
     /** When true, rows that have a signature set will be locked and non-editable */
     isStaff?: boolean;
+    /** ISO date string of the actual last working day of the previous month (e.g. "2026-05-24") */
+    prevLastWorkingDayStr?: string;
 }
 
 // LAYOUT CONSTANTS - Compressed for A4
@@ -233,9 +235,52 @@ export const PrintableTimesheet: React.FC<Props> = ({
     leaveSummary = { sick: 0, casual: 0, earn: 0, other: 0 },
     attendanceLateByDay = {},
     isStaff = false,
+    prevLastWorkingDayStr,
 }) => {
+    // Format OT hours: show as integer if whole number, otherwise up to 2 decimal places
+    const fmtOT = (h: number): string => {
+        if (h <= 0) return '';
+        return h % 1 === 0 ? String(h) : parseFloat(h.toFixed(2)).toString();
+    };
     const daysInMonth = new Date(timesheet.year, timesheet.month + 1, 0).getDate();
     const monthName = new Date(timesheet.year, timesheet.month).toLocaleString('default', { month: 'long' });
+
+    // Compute the last working day of the month (same logic as TimesheetView)
+    const lastWorkingDay = useMemo((): number | null => {
+        for (let day = daysInMonth; day >= 1; day--) {
+            const d = new Date(timesheet.year, timesheet.month, day);
+            const isWeekend = template ? false : (d.getDay() === 5 || d.getDay() === 6);
+            const holiday = template?.holidays?.find(h => h.date === day);
+            if (!isWeekend && !holiday) return day;
+        }
+        return null;
+    }, [timesheet.year, timesheet.month, daysInMonth, template]);
+
+    // Build the auto-remark for row 09: list of OT dates (excluding last working day)
+    const otDatesRemark = useMemo((): string => {
+        const dates = Object.keys(otByDay)
+            .map(Number)
+            .filter(d => d !== lastWorkingDay && otByDay[d] > 0)
+            .sort((a, b) => a - b);
+        if (dates.length === 0) return '';
+        return dates.join(', ');
+    }, [otByDay, lastWorkingDay]);
+
+    // Compute the display label for the previous month's last working day (for row 07 remarks)
+    const prevMonthLastDayLabel = useMemo((): string => {
+        if (prevLastWorkingDayStr) {
+            // Parse as local date to avoid timezone shifting
+            const [y, m, d] = prevLastWorkingDayStr.split('-').map(Number);
+            const prevDate = new Date(y, m - 1, d);
+            return prevDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+        }
+        // Fallback: last calendar day of previous month
+        const prevMonthIndex = timesheet.month === 0 ? 11 : timesheet.month - 1;
+        const prevYear = timesheet.month === 0 ? timesheet.year - 1 : timesheet.year;
+        const lastDay = new Date(prevYear, prevMonthIndex + 1, 0).getDate();
+        return new Date(prevYear, prevMonthIndex, lastDay)
+            .toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+    }, [prevLastWorkingDayStr, timesheet.month, timesheet.year]);
     
     const days = useMemo(() => {
         return Array.from({ length: daysInMonth }, (_, i) => {
@@ -497,11 +542,22 @@ export const PrintableTimesheet: React.FC<Props> = ({
 
                                      {isHoliday ? (
                                          <>
-                                             <div className="absolute h-full left-[40px] top-0 w-[593.688px]">
-                                                 <div className="absolute border-[#000000] border-solid inset-0 pointer-events-none" style={{ borderWidth: '0px 0px 1px 0px' }} />
+                                             <div className="absolute h-full left-[40px] top-0 w-[160px]">
+                                                 <div className="absolute border-[#000000] border-solid inset-0 pointer-events-none" style={{ borderWidth: '0px 1px 1px 0px' }} />
                                                  <p className={`${fontRegular} text-[11px] absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2`}>
                                                      {day.holiday ? day.holiday.reason : 'Weekly Holiday'}
                                                  </p>
+                                             </div>
+                                             <div className="absolute h-full left-[200px] top-0 w-[56px]">
+                                                 <div className="absolute border-[#000000] border-solid inset-0 pointer-events-none" style={{ borderWidth: '0px 1px 1px 0px' }} />
+                                                 {otByDay[day.date] != null && otByDay[day.date] > 0 && (
+                                                     <p className={`${fontBold} text-[11px] text-blue-700 absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2`}>
+                                                         {fmtOT(otByDay[day.date])}
+                                                     </p>
+                                                 )}
+                                             </div>
+                                             <div className="absolute h-full top-0" style={{ left: '256px', width: '377.688px' }}>
+                                                  <div className="absolute border-[#000000] border-solid inset-0 pointer-events-none" style={{ borderWidth: '0px 1px 1px 0px' }} />
                                              </div>
                                              <div className="absolute h-full left-[633.69px] top-0 w-[96px]">
                                                  <div className="absolute border-[#000000] border-solid inset-0 pointer-events-none" style={{ borderWidth: '0px 0px 1px 0px' }} />
@@ -509,13 +565,23 @@ export const PrintableTimesheet: React.FC<Props> = ({
                                              </div>
                                          </>
                                      ) : leaveDay && !leaveDay.isPartial ? (
-                                         // Leave day row: type label in time area, reason in remarks
                                          <>
-                                             <div className="absolute h-full left-[40px] top-0" style={{ width: '264px' }}>
+                                             <div className="absolute h-full left-[40px] top-0" style={{ width: '160px' }}>
                                                  <div className="absolute border-[#000000] border-solid inset-0 pointer-events-none" style={{ borderWidth: '0px 1px 1px 0px' }} />
                                                  <p className={`${fontRegular} text-[11px] absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap`}>
                                                      {leaveDay.type}
                                                  </p>
+                                             </div>
+                                             <div className="absolute h-full left-[200px] top-0 w-[56px]">
+                                                 <div className="absolute border-[#000000] border-solid inset-0 pointer-events-none" style={{ borderWidth: '0px 1px 1px 0px' }} />
+                                                 {otByDay[day.date] != null && otByDay[day.date] > 0 && (
+                                                     <p className={`${fontBold} text-[11px] text-blue-700 absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2`}>
+                                                         {fmtOT(otByDay[day.date])}
+                                                     </p>
+                                                 )}
+                                             </div>
+                                             <div className="absolute h-full top-0" style={{ left: '256px', width: '48px' }}>
+                                                 <div className="absolute border-[#000000] border-solid inset-0 pointer-events-none" style={{ borderWidth: '0px 1px 1px 0px' }} />
                                              </div>
                                              <div className="absolute h-full top-0" style={{ left: '304px', width: '329.688px' }}>
                                                  <div className="absolute border-[#000000] border-solid inset-0 pointer-events-none" style={{ borderWidth: '0px 1px 1px 0px' }} />
@@ -530,12 +596,10 @@ export const PrintableTimesheet: React.FC<Props> = ({
                                          </>
                                      ) : (
                                          (() => {
-                                             // Lock this row for Staff if Admin has signed it
                                              const isRowLocked = isStaff && !!day.entry.signatureId;
                                              const effectiveEditing = isEditing && !isRowLocked;
                                              return (
                                              <>
-                                                 {/* Locked row highlight for Staff */}
                                                  {isRowLocked && (
                                                      <div className="absolute inset-0 pointer-events-none" style={{ backgroundColor: 'rgba(254,226,226,0.45)', borderLeft: '3px solid #ef4444' }} />
                                                  )}
@@ -549,26 +613,22 @@ export const PrintableTimesheet: React.FC<Props> = ({
                                              </div>
                                              <div className="absolute h-full left-[200px] top-0 w-[56px]">
                                                  <div className="absolute border-[#000000] border-solid inset-0 pointer-events-none" style={{ borderWidth: '0px 1px 1px 0px' }} />
-                                                 {/* OT is always read-only — value comes from Approved OT records */}
                                                  <InputCell
                                                      isEditing={false}
-                                                     value={otByDay[day.date] != null ? otByDay[day.date].toFixed(2) : ''}
+                                                     value={fmtOT(otByDay[day.date] ?? 0)}
                                                      onChange={() => {}}
-                                                     className={`${fontRegular} text-[11px]`}
+                                                     className={`${fontBold} text-[11px] text-blue-700`}
                                                  />
                                              </div>
                                               <div className="absolute h-full top-0" style={{ left: '256px', width: '48px' }}>
                                                   <div className="absolute border-[#000000] border-solid inset-0 pointer-events-none" style={{ borderWidth: '0px 1px 1px 0px' }} />
                                                   {(() => {
                                                       let displayLate = day.entry.late || '';
-                                                      
                                                       const isHalfDayLeave = !!(leaveDay && leaveDay.isHalfDay);
                                                       const canEditLate = !!(effectiveEditing && isHalfDayLeave);
-
                                                       if (isHalfDayLeave && !day.entry.manualLate && displayLate) {
                                                           displayLate = '';
                                                       }
-
                                                       return (
                                                           <div className="relative w-full h-full group">
                                                               <InputCell 
@@ -683,8 +743,8 @@ export const PrintableTimesheet: React.FC<Props> = ({
                                                  displayValue = (totalLeaves === 0 && lateNum === 0) ? 'Yes' : 'No';
                                              }
                                              // OT rows
-                                             if (row.sl === '07') displayValue = prevMonthEndOT > 0 ? prevMonthEndOT.toFixed(2) : '0';
-                                             if (row.sl === '09') displayValue = totalOT > 0 ? totalOT.toFixed(2) : '0';
+                                             if (row.sl === '07') displayValue = prevMonthEndOT > 0 ? fmtOT(prevMonthEndOT) : '0';
+                                             if (row.sl === '09') displayValue = totalOT > 0 ? fmtOT(totalOT) : '0';
                                              const cellClass = row.sl === '04'
                                                  ? `${fontBold} text-red-600 text-[11px]`
                                                  : row.sl === '06'
@@ -704,7 +764,25 @@ export const PrintableTimesheet: React.FC<Props> = ({
                                     </div>
                                     <div className="absolute h-full left-[392px] top-0 w-[337.688px]">
                                          <div className="absolute border-[#000000] border-solid inset-0 pointer-events-none" style={{ borderWidth: '0px 0px 1px 0px' }} />
-                                         <InputCell isEditing={isEditing} value={summaryItem.remarks} onChange={(v) => handleSummaryChange(row.sl, 'remarks', v)} className={`${fontRegular} text-[11px]`} align="left" />
+                                         {row.sl === '07' ? (
+                                             <InputCell
+                                                 isEditing={false}
+                                                 value={prevMonthLastDayLabel}
+                                                 onChange={() => {}}
+                                                 className={`${fontRegular} text-[11px] text-blue-700`}
+                                                 align="left"
+                                             />
+                                         ) : row.sl === '09' ? (
+                                             <InputCell
+                                                 isEditing={false}
+                                                 value={otDatesRemark}
+                                                 onChange={() => {}}
+                                                 className={`${fontRegular} text-[11px] text-blue-700`}
+                                                 align="left"
+                                             />
+                                         ) : (
+                                             <InputCell isEditing={isEditing} value={summaryItem.remarks} onChange={(v) => handleSummaryChange(row.sl, 'remarks', v)} className={`${fontRegular} text-[11px]`} align="left" />
+                                         )}
                                     </div>
                                 </div>
                             );
