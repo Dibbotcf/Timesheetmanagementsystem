@@ -465,7 +465,7 @@ export const EmployeeRecordsReport: React.FC<{ onBack: () => void }> = ({ onBack
                                             <td className="py-2 border-b border-gray-100 text-gray-900 pl-3">{r.date}</td>
                                             <td className="py-2 border-b border-gray-100 text-gray-500">{r.day}</td>
                                             <td className="py-2 border-b border-gray-100"><span className={`${BADGES.amber} px-2 py-1 rounded`}>{r.hours}h</span></td>
-                                            <td className="py-2 border-b border-gray-100 text-gray-500 text-xs truncate" title={r.note}>{r.note}</td>
+                                            <td className="py-2 border-b border-gray-100 text-gray-500 text-xs truncate max-w-[150px]" title={r.note}>{r.note}</td>
                                         </tr>
                                     )) : <tr><td colSpan={4} className="py-4 text-center text-gray-400">No OT records</td></tr>}
                                 </tbody>
