@@ -677,7 +677,7 @@ export const Attendance: React.FC<{ dashboardMode?: boolean }> = ({ dashboardMod
   };
 
   return (
-    <div className={`flex flex-col ${dashboardMode ? '' : 'h-full'} print:bg-white print:p-0`} style={{ fontFamily: "'Inter', 'Segoe UI', sans-serif" }}>
+    <div className={`flex flex-col ${dashboardMode ? '' : 'h-full'} print:bg-white print:p-0`} style={{ fontFamily: "'Times New Roman', Times, serif" }}>
 
       {/* ══ Premium Toolbar ══ */}
       {!dashboardMode && (
