@@ -1115,7 +1115,8 @@ export const OTManagement: React.FC = () => {
         updateOTRecord(editingRecordId, {
             hours: formData.hours || 0,
             reason: formData.hours === 0 ? '' : formData.reason,
-            status: 'Pending'
+            status: 'Pending',
+            submittedAt: new Date().toISOString()
         });
         toast.success("OT Claim updated successfully");
     } else {
