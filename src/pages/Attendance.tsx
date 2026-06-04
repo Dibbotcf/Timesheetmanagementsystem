@@ -576,7 +576,7 @@ export const Attendance: React.FC<{ dashboardMode?: boolean }> = ({ dashboardMod
   // 6. Excel Export
   const handleExportExcel = () => {
     // Build header row
-    const headerCols = ["Employee", "EID", ...daysArray.map(d => `${d} (${getDayShort(d)})`), "Leaves (L)", "Attend (A)", "Working Days (D)", "Lates (min)"];
+    const headerCols = ["Employee", "EID", ...daysArray.map(d => `${d} (${getDayShort(d)})`), "Leaves (L)", "Attend (A)", "Working Days (D)", "Lates (min)", "Bonus"];
 
     // Build data rows
     const rows: (string | number)[][] = filteredEmployees.map(emp => {
@@ -585,7 +585,8 @@ export const Attendance: React.FC<{ dashboardMode?: boolean }> = ({ dashboardMod
         const stat = getEffectiveCellStatus(emp.id, day);
         return stat ? STATUS_CONFIG[stat].label : "-";
       });
-      return [emp.name, emp.eid, ...dayStatuses, leave, present, workingDays, lates];
+      const bonusEligible = (lates === 0 && leave === 0) ? 'Yes' : 'No';
+      return [emp.name, emp.eid, ...dayStatuses, leave, present, workingDays, lates, bonusEligible];
     });
 
     // Build XML for xlsx (Office Open XML minimal)
@@ -814,11 +815,12 @@ export const Attendance: React.FC<{ dashboardMode?: boolean }> = ({ dashboardMod
               {daysArray.map(day => (
                 <col key={day} style={{ width: `calc((100% - 170px - 142px) / ${daysInMonth})` }} />
               ))}
-              {/* Summary cols: L, A, D, Hrs */}
+              {/* Summary cols: L, A, D, Hrs, Bonus */}
               <col style={{ width: '30px' }} />
               <col style={{ width: '30px' }} />
               <col style={{ width: '30px' }} />
               <col style={{ width: '52px' }} />
+              <col style={{ width: '45px' }} />
             </colgroup>
 
             {/* ─ Header Row ─ */}
@@ -887,13 +889,13 @@ export const Attendance: React.FC<{ dashboardMode?: boolean }> = ({ dashboardMod
 
 
                 {/* Summary columns */}
-                {['L','A','D','Lates'].map(col => (
+                {['L','A','D','Lates','Bonus'].map(col => (
                   <th key={col} style={{
                     padding: '10px 4px',
                     textAlign: 'center',
                     borderLeft: col === 'L' ? '2px solid #e2e8f0' : '1px solid #e2e8f0',
                     fontSize: '10px', fontWeight: 700,
-                    color: col === 'A' ? '#ef4444' : col === 'L' ? '#8b5cf6' : col === 'D' ? '#10b981' : '#64748b',
+                    color: col === 'A' ? '#ef4444' : col === 'L' ? '#8b5cf6' : col === 'D' ? '#10b981' : col === 'Bonus' ? '#f59e0b' : '#64748b',
                     background: '#f8fafc', textTransform: 'uppercase',
                     overflow: 'hidden'
                   }}>{col}</th>
@@ -1074,6 +1076,15 @@ export const Attendance: React.FC<{ dashboardMode?: boolean }> = ({ dashboardMod
                         color: lates > 0 ? '#ef4444' : '#cbd5e1',
                         overflow: 'hidden'
                       }}>{lates > 0 ? lates : '—'}</td>
+                      {/* Bonus Eligibility */}
+                      <td style={{
+                        textAlign: 'center',
+                        borderRight: '1px solid #f1f5f9',
+                        background: rowBg,
+                        fontSize: '11px', fontWeight: 700,
+                        color: (lates === 0 && leave === 0) ? '#10b981' : '#ef4444',
+                        overflow: 'hidden'
+                      }}>{(lates === 0 && leave === 0) ? 'Yes' : 'No'}</td>
 
                     </tr>
                   );
@@ -1088,7 +1099,7 @@ export const Attendance: React.FC<{ dashboardMode?: boolean }> = ({ dashboardMod
           <span style={{ color: '#94a3b8' }}>
             <strong style={{ color: '#475569' }}>{filteredEmployees.length}</strong> employees · {MONTHS[selectedMonth]} {selectedYear}
           </span>
-          <span style={{ color: '#cbd5e1', fontSize: '10px' }}>L = Leave · A = Attend · D = Working Days · Lates = Total Lates</span>
+          <span style={{ color: '#cbd5e1', fontSize: '10px' }}>L = Leave · A = Attend · D = Working Days · Lates = Total Lates · Bonus = Eligible</span>
         </div>
 
       </div>
