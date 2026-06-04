@@ -785,12 +785,23 @@ export default function App() {
   };
 
   const updateOTRecord = async (id: string, data: Partial<OTRecord>) => {
-    const ot = otRecords.find(o => o.id === id);
-    if (!ot) return;
-    const updated = { ...ot, ...data };
-    if (await saveItem('ot_records', updated)) {
-      setOtRecords(otRecords.map(o => o.id === id ? updated : o));
-    }
+    // We cannot reliably use `otRecords` from closure here if it's called in a rapid loop,
+    // but we can use `prev` in the setState. However, we need the original item to merge data.
+    // Instead of failing if `!ot`, we can just fetch the existing item inside `setOtRecords` or trust `data` contains what's needed.
+    // Wait, since we are doing `saveItem`, we need the full object.
+    
+    // To handle rapid loops properly, we should fetch from the LATEST state
+    setOtRecords(prev => {
+        const ot = prev.find(o => o.id === id);
+        if (!ot) return prev;
+        const updated = { ...ot, ...data };
+        
+        // Fire and forget the saveItem to avoid awaiting inside state setter. 
+        // This means the API might take time, but local state updates instantly.
+        saveItem('ot_records', updated).catch(console.error);
+        
+        return prev.map(o => o.id === id ? updated : o);
+    });
   };
 
   const deleteOTRecord = async (id: string) => {

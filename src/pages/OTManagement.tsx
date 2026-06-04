@@ -1100,6 +1100,17 @@ export const OTManagement: React.FC = () => {
         return;
     }
     
+    const targetEmployeeId = formData.employeeId || currentUser?.id;
+    
+    if (!editingRecordId) {
+        // Prevent double entry for same date and same employee
+        const existingRecord = otRecords.find(r => r.employeeId === targetEmployeeId && r.date === formData.date);
+        if (existingRecord) {
+            toast.error("An OT claim already exists for this employee on this date.");
+            return;
+        }
+    }
+    
     if (editingRecordId) {
         updateOTRecord(editingRecordId, {
             hours: formData.hours || 0,
@@ -1108,7 +1119,6 @@ export const OTManagement: React.FC = () => {
         });
         toast.success("OT Claim updated successfully");
     } else {
-        const targetEmployeeId = formData.employeeId || currentUser?.id;
         const targetEmployeeName = employees.find(e => e.id === targetEmployeeId)?.name || currentUser?.name;
 
         addOTRecord({
@@ -1119,7 +1129,7 @@ export const OTManagement: React.FC = () => {
             endTime: '-',
             hours: formData.hours || 0,
             reason: formData.hours === 0 ? '' : formData.reason,
-            status: 'Pending', // Default to pending
+            status: 'Pending',
             submittedAt: new Date().toISOString()
         });
         toast.success("OT Claim submitted successfully");
