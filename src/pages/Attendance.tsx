@@ -1,10 +1,10 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { useAppStore, Employee, AttendanceRecord } from '../App';
 import { Button } from '../components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '../components/ui/popover';
 import {
-  Plus, Printer, ArrowDownToLine, Users, Search, AlertCircle, Trash2
+  Plus, Printer, ArrowDownToLine, Users, Search, AlertCircle, Trash2, ChevronDown, X, Check, FileX
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -112,7 +112,7 @@ const AttendanceCellContent: React.FC<{
 
   if (leaveInfo) {
     return (
-      <div className="flex flex-col items-center justify-center w-full h-full gap-0" style={{ padding: '2px 4px' }}>
+      <div className="flex flex-col items-center justify-center w-full h-full gap-0" style={{ padding: '2px 4px' }} title={leaveInfo.type}>
         <span className="text-[12px] font-extrabold text-[#b91c1c] leading-tight text-center mb-0.5" style={{ wordBreak: 'break-word', lineHeight: '1.1' }}>
           {leaveInfo.code}
         </span>
@@ -221,12 +221,17 @@ const STATUS_CONFIG = {
 type AttendanceStatus = keyof typeof STATUS_CONFIG;
 
 export const Attendance: React.FC<{ dashboardMode?: boolean }> = ({ dashboardMode }) => {
-  const { employees, attendanceRecords, saveAttendanceRecord, templates, getTemplate, currentUser, leaves } = useAppStore();
+  const { employees, attendanceRecords, saveAttendanceRecord, templates, getTemplate, currentUser, leaves, timesheets } = useAppStore();
 
   const [selectedMonth, setSelectedMonth] = useState<number>(new Date().getMonth());
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
-  const [employeeFilter, setEmployeeFilter] = useState<string>('all');
+  // Multi-select employee filter: empty array = All Employees
+  const [employeeFilter, setEmployeeFilter] = useState<string[]>([]);
+  const [empDropdownSearch, setEmpDropdownSearch] = useState<string>('');
+  const [empDropdownOpen, setEmpDropdownOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
+  // Toggle: show only employees WITH a timesheet for the selected month/year
+  const [showWithTimesheetOnly, setShowWithTimesheetOnly] = useState(false);
 
   // Modal States
   const [isMarkModalOpen, setIsMarkModalOpen] = useState(false);
@@ -325,10 +330,34 @@ export const Attendance: React.FC<{ dashboardMode?: boolean }> = ({ dashboardMod
     return map;
   }, [leaves, selectedYear, selectedMonth]);
 
+  // Helper: parse numeric portion of EID for sorting (e.g. "TCF-007" -> 7)
+  const parseEidNumber = (eid: string): number => {
+    const match = eid.match(/\d+/);
+    return match ? parseInt(match[0], 10) : Infinity;
+  };
+
+  const sortByEid = (a: Employee, b: Employee): number => {
+    const eIdA = a.eid || '';
+    const eIdB = b.eid || '';
+    const aNum = parseEidNumber(eIdA);
+    const bNum = parseEidNumber(eIdB);
+    if (aNum !== bNum) return aNum - bNum;
+    return eIdA.localeCompare(eIdB);
+  };
+
   // 2. Filter active employees list
   const activeEmployees = useMemo(() => {
-    return employees.filter(emp => emp.status === 'Active');
+    return [...employees].filter(emp => emp.status === 'Active').sort(sortByEid);
   }, [employees]);
+
+  // Set of employeeIds who have a timesheet for the selected month/year
+  const employeesWithTimesheetIds = useMemo(() => {
+    return new Set(
+      timesheets
+        .filter(ts => ts.year === selectedYear && ts.month === selectedMonth)
+        .map(ts => ts.employeeId)
+    );
+  }, [timesheets, selectedYear, selectedMonth]);
 
   const filteredEmployees = useMemo(() => {
     // If current user is Staff, restrict view to only themselves
@@ -336,13 +365,32 @@ export const Attendance: React.FC<{ dashboardMode?: boolean }> = ({ dashboardMod
       ? activeEmployees.filter(e => e.id === currentUser.id)
       : activeEmployees;
 
-    return list.filter(emp => {
+    return [...list].filter(emp => {
       const matchSearch = emp.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
                           emp.eid.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchFilter = employeeFilter === 'all' || emp.id === employeeFilter;
-      return matchSearch && matchFilter;
-    });
-  }, [activeEmployees, employeeFilter, searchQuery, currentUser]);
+      // Empty array = All Employees; otherwise only show selected IDs
+      const matchFilter = employeeFilter.length === 0 || employeeFilter.includes(emp.id);
+      // Timesheet filter: if toggle is on, only show employees with a timesheet
+      const matchTimesheet = !showWithTimesheetOnly || employeesWithTimesheetIds.has(emp.id);
+      return matchSearch && matchFilter && matchTimesheet;
+    }).sort(sortByEid);
+  }, [activeEmployees, employeeFilter, searchQuery, currentUser, showWithTimesheetOnly, employeesWithTimesheetIds]);
+
+  // Employees shown inside the dropdown (filtered by dropdown search)
+  const dropdownEmployees = useMemo(() => {
+    if (!empDropdownSearch) return activeEmployees;
+    const q = empDropdownSearch.toLowerCase();
+    return activeEmployees.filter(e =>
+      e.name.toLowerCase().includes(q) || e.eid.toLowerCase().includes(q)
+    );
+  }, [activeEmployees, empDropdownSearch]);
+
+  // Toggle a single employee in the multi-select filter
+  const toggleEmployeeFilter = (id: string) => {
+    setEmployeeFilter(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
+  };
 
   // 3. Helper to locate record and fetch cell values
   const getCellStatus = (empId: string, dayNum: number): AttendanceStatus | undefined => {
@@ -573,54 +621,139 @@ export const Attendance: React.FC<{ dashboardMode?: boolean }> = ({ dashboardMod
     }
   };
 
-  // 6. Excel Export
+  // 6. Excel Export — proper HTML table (opens natively in Excel, no warnings)
   const handleExportExcel = () => {
-    // Build header row
-    const headerCols = ["Employee", "EID", ...daysArray.map(d => `${d} (${getDayShort(d)})`), "Leaves (L)", "Attend (A)", "Working Days (D)", "Lates (min)", "Bonus"];
+    const esc = (v: string | number) =>
+      String(v)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+
+    // Status color map
+    const statusColors: Record<string, string> = {
+      Present:  '#d4edda',
+      Late:     '#fff3cd',
+      Absent:   '#f8d7da',
+      Holiday:  '#cce5ff',
+      DayOff:   '#e2e8f0',
+      HalfDay:  '#ffe4e1',
+      OnLeave:  '#e8d5f5',
+    };
+
+    // Build table header
+    let headCells = `
+      <th style="background:#1e293b;color:#fff;padding:6px 8px;font-size:11px;white-space:nowrap;border:1px solid #fff;">Employee</th>
+      <th style="background:#1e293b;color:#fff;padding:6px 8px;font-size:11px;white-space:nowrap;border:1px solid #fff;">EID</th>`;
+    daysArray.forEach(day => {
+      const isWkEnd = isWeekend(day);
+      const tmplSt = getTemplateDayStatus(day);
+      const isOff = isWkEnd || tmplSt === 'Holiday' || tmplSt === 'DayOff';
+      const bg = isOff ? '#c7d7f0' : '#1e293b';
+      const col = isOff ? '#1e293b' : '#fff';
+      headCells += `<th style="background:${bg};color:${col};padding:4px 2px;font-size:10px;text-align:center;border:1px solid #fff;min-width:28px;">
+        ${getDayShort(day)}<br/>${day}
+      </th>`;
+    });
+    headCells += `
+      <th style="background:#4c1d95;color:#fff;padding:6px 4px;font-size:11px;text-align:center;border:1px solid #fff;">L</th>
+      <th style="background:#991b1b;color:#fff;padding:6px 4px;font-size:11px;text-align:center;border:1px solid #fff;">A</th>
+      <th style="background:#065f46;color:#fff;padding:6px 4px;font-size:11px;text-align:center;border:1px solid #fff;">D</th>
+      <th style="background:#78350f;color:#fff;padding:6px 4px;font-size:10px;text-align:center;border:1px solid #fff;">Lates<br/>(min)</th>
+      <th style="background:#92400e;color:#fff;padding:6px 4px;font-size:11px;text-align:center;border:1px solid #fff;">Bonus</th>`;
 
     // Build data rows
-    const rows: (string | number)[][] = filteredEmployees.map(emp => {
+    let bodyRows = '';
+    filteredEmployees.forEach((emp, rowIdx) => {
       const { present, leave, lates, workingDays } = getEmployeeMetrics(emp.id);
-      const dayStatuses = daysArray.map(day => {
-        const stat = getEffectiveCellStatus(emp.id, day);
-        return stat ? STATUS_CONFIG[stat].label : "-";
+      const bonusEligible = lates === 0 && leave === 0;
+      const rowBg = rowIdx % 2 === 0 ? '#ffffff' : '#f8fafc';
+
+      let cells = `
+        <td style="background:${rowBg};padding:5px 8px;font-size:11px;font-weight:600;white-space:nowrap;border:1px solid #e2e8f0;">${esc(emp.name)}</td>
+        <td style="background:${rowBg};padding:5px 8px;font-size:10px;font-family:monospace;white-space:nowrap;border:1px solid #e2e8f0;">${esc(emp.eid)}</td>`;
+
+      daysArray.forEach(day => {
+        const status = getEffectiveCellStatus(emp.id, day);
+        const details = getCellDetails(emp.id, day);
+        const leaveDay = leavesMap[emp.id]?.[day];
+        const isWkEnd = isWeekend(day);
+        const isOff = isWkEnd || status === 'Holiday' || status === 'DayOff';
+
+        let cellBg = isOff ? '#e8f0fe' : (statusColors[status || ''] || rowBg);
+        if (leaveDay && !leaveDay.isPartial) cellBg = '#e8d5f5';
+
+        let cellContent = '';
+        let cellStyle = `background:${cellBg};padding:2px 2px;font-size:9px;text-align:center;border:1px solid #e2e8f0;`;
+
+        if (leaveDay && !leaveDay.isPartial) {
+          cellContent = `<span style="color:#7c3aed;font-weight:700;">${esc(leaveDay.code)}</span>`;
+        } else if (details?.clockIn) {
+          const inT = details.clockIn;
+          const outT = details.clockOut || '';
+          const late = details.lateMinutes && details.lateMinutes > 0 ? details.lateMinutes : 0;
+          cellContent = `<span style="color:#374151;">${esc(inT)}</span>`;
+          if (outT) cellContent += `<br/><span style="color:#374151;">${esc(outT)}</span>`;
+          if (late > 0) cellContent += `<br/><span style="color:#dc2626;font-weight:700;">${late}m</span>`;
+        } else if (status === 'Holiday') {
+          cellContent = `<span style="color:#1d4ed8;font-weight:700;">H</span>`;
+        } else if (status === 'DayOff' || isOff) {
+          cellContent = `<span style="color:#94a3b8;">—</span>`;
+        } else if (status === 'Absent') {
+          cellContent = `<span style="color:#dc2626;font-weight:700;">A</span>`;
+        } else if (status === 'OnLeave') {
+          cellContent = `<span style="color:#7c3aed;font-weight:700;">L</span>`;
+        } else if (status === 'HalfDay') {
+          cellContent = `<span style="color:#f43f5e;font-weight:700;">H/D</span>`;
+        } else if (status === 'Present') {
+          cellContent = `<span style="color:#16a34a;font-weight:700;">✓</span>`;
+        } else {
+          cellContent = `<span style="color:#cbd5e1;">—</span>`;
+        }
+
+        cells += `<td style="${cellStyle}">${cellContent}</td>`;
       });
-      const bonusEligible = (lates === 0 && leave === 0) ? 'Yes' : 'No';
-      return [emp.name, emp.eid, ...dayStatuses, leave, present, workingDays, lates, bonusEligible];
+
+      // Summary cols
+      cells += `
+        <td style="background:${rowBg};text-align:center;font-size:11px;font-weight:700;color:${leave > 0 ? '#7c3aed' : '#cbd5e1'};border:1px solid #e2e8f0;padding:4px;">${leave > 0 ? leave : '—'}</td>
+        <td style="background:${rowBg};text-align:center;font-size:11px;font-weight:700;color:${present > 0 ? '#dc2626' : '#cbd5e1'};border:1px solid #e2e8f0;padding:4px;">${present > 0 ? present : '—'}</td>
+        <td style="background:${rowBg};text-align:center;font-size:11px;font-weight:700;color:${workingDays > 0 ? '#059669' : '#cbd5e1'};border:1px solid #e2e8f0;padding:4px;">${workingDays > 0 ? workingDays : '—'}</td>
+        <td style="background:${rowBg};text-align:center;font-size:11px;font-weight:700;color:${lates > 0 ? '#dc2626' : '#cbd5e1'};border:1px solid #e2e8f0;padding:4px;">${lates > 0 ? lates : '—'}</td>
+        <td style="background:${bonusEligible ? '#d1fae5' : '#fee2e2'};text-align:center;font-size:11px;font-weight:700;color:${bonusEligible ? '#065f46' : '#991b1b'};border:1px solid #e2e8f0;padding:4px;">${bonusEligible ? 'Yes' : 'No'}</td>`;
+
+      bodyRows += `<tr>${cells}</tr>`;
     });
 
-    // Build XML for xlsx (Office Open XML minimal)
-    const escXml = (v: string | number) => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    const html = `
+<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<!--[if gte mso 9]><xml>
+<x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet>
+<x:Name>Attendance ${MONTHS[selectedMonth]} ${selectedYear}</x:Name>
+<x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions>
+</x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook>
+</xml><![endif]-->
+<style>
+  body { font-family: Calibri, Arial, sans-serif; }
+  table { border-collapse: collapse; width: 100%; }
+  .title-row td { font-size: 14px; font-weight: bold; color: #1e293b; padding: 8px; }
+  .sub-row td { font-size: 11px; color: #64748b; padding: 4px 8px 8px; }
+</style>
+</head>
+<body>
+<table>
+  <tr class="title-row"><td colspan="${daysInMonth + 7}">TCF Attendance Sheet — ${MONTHS[selectedMonth]} ${selectedYear}</td></tr>
+  <tr class="sub-row"><td colspan="${daysInMonth + 7}">${filteredEmployees.length} employees &nbsp;|&nbsp; L = Leave Days &nbsp;|&nbsp; A = Present Days &nbsp;|&nbsp; D = Working Days &nbsp;|&nbsp; Lates = Total Late Minutes &nbsp;|&nbsp; Bonus = Bonus Eligible</td></tr>
+  <tr>${headCells}</tr>
+  ${bodyRows}
+</table>
+</body>
+</html>`;
 
-    const allRows = [headerCols, ...rows];
-    const wsXml = allRows.map((row, ri) =>
-      `<row r="${ri + 1}">${row.map((cell, ci) => {
-        const colLetter = String.fromCharCode(65 + (ci < 26 ? ci : 0)) + (ci >= 26 ? String.fromCharCode(65 + ci - 26) : '');
-        const addr = `${colLetter}${ri + 1}`;
-        const isNum = typeof cell === 'number';
-        return isNum
-          ? `<c r="${addr}" t="n"><v>${cell}</v></c>`
-          : `<c r="${addr}" t="inlineStr"><is><t>${escXml(cell)}</t></is></c>`;
-      }).join('')}</row>`
-    ).join('');
-
-    const xlsx = [
-      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`,
-      `<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">`,
-      `<sheets><sheet name="Attendance" sheetId="1" r:id="rId1"/></sheets></workbook>`
-    ];
-
-    const sheetXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${wsXml}</sheetData></worksheet>`;
-    const relsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>`;
-    const contentTypes = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>`;
-    const topRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`;
-
-    // Pack into zip using JSZip-like manual approach — use a data URI with HTML table as xlsx fallback
-    // Since we can't use JSZip without install, export as TSV with .xls extension (Excel opens natively)
-    let tsvContent = headerCols.join("\t") + "\n";
-    rows.forEach(row => { tsvContent += row.join("\t") + "\n"; });
-
-    const blob = new Blob([tsvContent], { type: 'application/vnd.ms-excel;charset=utf-8;' });
+    const blob = new Blob([html], { type: 'application/vnd.ms-excel;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
@@ -631,10 +764,189 @@ export const Attendance: React.FC<{ dashboardMode?: boolean }> = ({ dashboardMod
     URL.revokeObjectURL(url);
   };
 
-  // 7. Print Preview
+
+  // 7. Print — opens a dedicated print window with clean HTML table
   const handlePrint = () => {
-    window.print();
+    const esc = (v: string | number) =>
+      String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+    // Build header cells
+    let headCells = `
+      <th class="emp-col">Employee</th>
+      <th class="eid-col">EID</th>`;
+    daysArray.forEach(day => {
+      const isWkEnd = isWeekend(day);
+      const tmplSt = getTemplateDayStatus(day);
+      const isOff = isWkEnd || tmplSt === 'Holiday' || tmplSt === 'DayOff';
+      headCells += `<th class="${isOff ? 'day-off-hdr' : 'day-hdr'}">${getDayShort(day)}<br/>${day}</th>`;
+    });
+    headCells += `
+      <th class="sum-hdr leave-hdr">L</th>
+      <th class="sum-hdr attend-hdr">A</th>
+      <th class="sum-hdr work-hdr">D</th>
+      <th class="sum-hdr late-hdr">Lates</th>
+      <th class="sum-hdr bonus-hdr">Bonus</th>`;
+
+    // Build body rows
+    let bodyRows = '';
+    filteredEmployees.forEach((emp, rowIdx) => {
+      const { present, leave, lates, workingDays } = getEmployeeMetrics(emp.id);
+      const bonusEligible = lates === 0 && leave === 0;
+      const rowCls = rowIdx % 2 === 0 ? 'row-even' : 'row-odd';
+
+      let cells = `
+        <td class="emp-cell">${esc(emp.name)}<br/><span class="eid-tag">${esc(emp.eid)}</span></td>
+        <td class="eid-cell">${esc(emp.eid)}</td>`;
+
+      daysArray.forEach(day => {
+        const status = getEffectiveCellStatus(emp.id, day);
+        const details = getCellDetails(emp.id, day);
+        const leaveDay = leavesMap[emp.id]?.[day];
+        const isWkEnd = isWeekend(day);
+        const isOff = isWkEnd || status === 'Holiday' || status === 'DayOff';
+
+        let cls = 'day-cell';
+        let content = '';
+
+        if (isOff && !details?.clockIn) {
+          cls += ' cell-off';
+          content = '<span class="dash">—</span>';
+        } else if (leaveDay && !leaveDay.isPartial) {
+          cls += ' cell-leave';
+          content = `<span class="leave-code">${esc(leaveDay.code)}</span>`;
+        } else if (details?.clockIn) {
+          cls += status === 'Late' ? ' cell-late' : ' cell-present';
+          content = `<span class="time-in">${esc(details.clockIn)}</span>`;
+          if (details.clockOut) content += `<span class="time-out">${esc(details.clockOut)}</span>`;
+          if (details.lateMinutes && details.lateMinutes > 0) content += `<span class="late-badge">${details.lateMinutes}m</span>`;
+        } else if (status === 'Present') {
+          cls += ' cell-present';
+          content = '<span class="check">✓</span>';
+        } else if (status === 'Absent') {
+          cls += ' cell-absent';
+          content = '<span class="absent-x">A</span>';
+        } else if (status === 'Holiday') {
+          cls += ' cell-holiday';
+          content = '<span class="holiday-h">H</span>';
+        } else if (status === 'OnLeave') {
+          cls += ' cell-leave';
+          content = '<span class="leave-code">L</span>';
+        } else if (status === 'HalfDay') {
+          cls += ' cell-halfday';
+          content = '<span class="half">H/D</span>';
+        } else {
+          content = '<span class="dash">—</span>';
+        }
+
+        cells += `<td class="${cls}">${content}</td>`;
+      });
+
+      // Summary
+      cells += `
+        <td class="sum-cell leave-val">${leave > 0 ? leave : '—'}</td>
+        <td class="sum-cell attend-val">${present > 0 ? present : '—'}</td>
+        <td class="sum-cell work-val">${workingDays > 0 ? workingDays : '—'}</td>
+        <td class="sum-cell late-val">${lates > 0 ? lates : '—'}</td>
+        <td class="sum-cell ${bonusEligible ? 'bonus-yes' : 'bonus-no'}">${bonusEligible ? 'Yes' : 'No'}</td>`;
+
+      bodyRows += `<tr class="${rowCls}">${cells}</tr>`;
+    });
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>TCF Attendance — ${MONTHS[selectedMonth]} ${selectedYear}</title>
+<style>
+  @page { size: A4 landscape; margin: 8mm 6mm; }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 8pt; color: #1e293b; background: #fff; }
+
+  .title { font-size: 13pt; font-weight: 700; color: #1e293b; margin-bottom: 2px; }
+  .subtitle { font-size: 7.5pt; color: #64748b; margin-bottom: 8px; }
+
+  table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+
+  /* Column widths */
+  .emp-col  { width: 110px; }
+  .eid-col  { display: none; }
+  .day-hdr, .day-off-hdr { width: auto; }
+  .sum-hdr  { width: 26px; }
+
+  /* Header */
+  th { padding: 4px 2px; text-align: center; font-size: 7pt; font-weight: 700; border: 1px solid #c7d2db; white-space: nowrap; }
+  .emp-col  { text-align: left; padding-left: 6px; background: #1e293b; color: #fff; font-size: 8pt; }
+  .day-hdr  { background: #1e293b; color: #fff; line-height: 1.2; }
+  .day-off-hdr { background: #b8cde0; color: #1e293b; line-height: 1.2; }
+  .leave-hdr  { background: #4c1d95; color: #fff; }
+  .attend-hdr { background: #991b1b; color: #fff; }
+  .work-hdr   { background: #065f46; color: #fff; }
+  .late-hdr   { background: #78350f; color: #fff; font-size: 6.5pt; }
+  .bonus-hdr  { background: #92400e; color: #fff; }
+
+  /* Rows */
+  .row-even td { background: #fff; }
+  .row-odd  td { background: #f8fafc; }
+  tr { page-break-inside: avoid; }
+
+  /* Employee cell */
+  .emp-cell { padding: 3px 5px; font-size: 7.5pt; font-weight: 600; text-align: left; border: 1px solid #e2e8f0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .eid-tag  { font-size: 6pt; color: #94a3b8; font-family: monospace; display: block; }
+  .eid-cell { display: none; }
+
+  /* Day cells */
+  .day-cell { padding: 2px 1px; text-align: center; vertical-align: middle; border: 1px solid #e8eef2; font-size: 7pt; height: 34px; }
+  .cell-off      { background: #e8f0f8 !important; }
+  .cell-present  { background: #d4edda !important; }
+  .cell-late     { background: #fff3cd !important; }
+  .cell-absent   { background: #f8d7da !important; }
+  .cell-holiday  { background: #cce5ff !important; }
+  .cell-leave    { background: #e8d5f5 !important; }
+  .cell-halfday  { background: #ffe4e1 !important; }
+
+  /* Text in day cells */
+  .time-in   { display: block; font-size: 6.5pt; color: #374151; line-height: 1.3; }
+  .time-out  { display: block; font-size: 6.5pt; color: #374151; line-height: 1.3; }
+  .late-badge { display: block; font-size: 6pt; color: #dc2626; font-weight: 700; line-height: 1.2; }
+  .check     { color: #16a34a; font-weight: 700; font-size: 9pt; }
+  .absent-x  { color: #dc2626; font-weight: 700; font-size: 8pt; }
+  .holiday-h { color: #1d4ed8; font-weight: 700; font-size: 8pt; }
+  .leave-code { color: #7c3aed; font-weight: 700; font-size: 8pt; }
+  .half      { color: #f43f5e; font-weight: 700; font-size: 7pt; }
+  .dash      { color: #cbd5e1; font-size: 9pt; }
+
+  /* Summary cells */
+  .sum-cell  { text-align: center; border: 1px solid #e2e8f0; font-weight: 700; font-size: 8pt; padding: 2px; }
+  .leave-val  { color: #7c3aed; border-left: 2px solid #c4b5fd !important; }
+  .attend-val { color: #dc2626; }
+  .work-val   { color: #059669; }
+  .late-val   { color: #dc2626; }
+  .bonus-yes  { color: #065f46; background: #d1fae5 !important; }
+  .bonus-no   { color: #991b1b; background: #fee2e2 !important; }
+
+  /* Footer legend */
+  .legend { margin-top: 6px; font-size: 6.5pt; color: #64748b; }
+</style>
+</head>
+<body>
+<div class="title">TCF Attendance Sheet — ${MONTHS[selectedMonth]} ${selectedYear}</div>
+<div class="subtitle">${filteredEmployees.length} employees &nbsp;·&nbsp; L = Leave Days &nbsp;·&nbsp; A = Present Days &nbsp;·&nbsp; D = Working Days &nbsp;·&nbsp; Lates = Total Late Minutes (min) &nbsp;·&nbsp; Bonus = Bonus Eligible</div>
+<table>
+  <thead><tr>${headCells}</tr></thead>
+  <tbody>${bodyRows}</tbody>
+</table>
+<div class="legend">Printed: ${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</div>
+<script>window.onload = function() { window.print(); window.onafterprint = function() { window.close(); }; }<\/script>
+</body>
+</html>`;
+
+    const win = window.open('', '_blank', 'width=1200,height=700');
+    if (win) {
+      win.document.write(html);
+      win.document.close();
+    }
   };
+
 
   // 8. Calculations for individual Employee rows (incl. total hours)
   const getEmployeeMetrics = (empId: string) => {
@@ -678,7 +990,59 @@ export const Attendance: React.FC<{ dashboardMode?: boolean }> = ({ dashboardMod
   };
 
   return (
-    <div className={`flex flex-col ${dashboardMode ? '' : 'h-full'} print:bg-white print:p-0`} style={{ fontFamily: "'Times New Roman', Times, serif" }}>
+    <div id="attendance-print-root" className={`flex flex-col ${dashboardMode ? '' : 'h-full'} print:bg-white print:p-0`} style={{ fontFamily: "'Times New Roman', Times, serif" }}>
+      {/* Print-specific styles */}
+      <style>{`
+        @media print {
+          @page { size: A4 landscape; margin: 6mm 5mm; }
+          /* Hide everything on screen except attendance root */
+          body > #root > * { display: none !important; }
+          body > #root > * > *:not(#attendance-print-root),
+          nav, aside, header { display: none !important; }
+          #attendance-print-root { display: flex !important; flex-direction: column !important; }
+          #attendance-print-area {
+            display: block !important;
+            border: none !important;
+            box-shadow: none !important;
+            overflow: visible !important;
+            flex: none !important;
+          }
+          #attendance-print-area table {
+            width: 100% !important;
+            table-layout: fixed !important;
+            font-size: 7.5pt !important;
+            border-collapse: collapse !important;
+          }
+          #attendance-print-area thead {
+            display: table-header-group !important;
+          }
+          #attendance-print-area thead th {
+            position: static !important;
+            background: #f8fafc !important;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+          .print-scroll-container {
+            overflow: visible !important;
+            height: auto !important;
+            max-height: none !important;
+            flex: none !important;
+          }
+          #attendance-print-area tbody td {
+            position: static !important;
+            height: auto !important;
+            min-height: 0 !important;
+            padding: 2px 1px !important;
+          }
+          #attendance-print-area tbody tr {
+            page-break-inside: avoid;
+          }
+          * {
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+        }
+      `}</style>
 
       {/* ══ Premium Toolbar ══ */}
       {!dashboardMode && (
@@ -713,6 +1077,44 @@ export const Attendance: React.FC<{ dashboardMode?: boolean }> = ({ dashboardMod
             <ArrowDownToLine className="h-3.5 w-3.5" /> Export Excel
           </button>
 
+          {/* Without Timesheet Toggle Button */}
+          {currentUser?.role !== 'Staff' && (
+            <button
+              onClick={() => setShowWithTimesheetOnly(prev => !prev)}
+              title={showWithTimesheetOnly ? 'Showing only employees with Timesheet — click to show all' : 'Click to show only employees WITH Timesheet'}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all hover:opacity-90 active:scale-95"
+              style={{
+                background: showWithTimesheetOnly ? '#fef3c7' : '#f1f5f9',
+                color: showWithTimesheetOnly ? '#92400e' : '#334155',
+                border: showWithTimesheetOnly ? '1px solid #f59e0b' : '1px solid #e2e8f0',
+                position: 'relative'
+              }}
+            >
+              <FileX className="h-3.5 w-3.5" />
+              {showWithTimesheetOnly ? 'With Timesheet' : 'Without Timesheet'}
+              {showWithTimesheetOnly && (
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    background: '#f59e0b',
+                    color: '#fff',
+                    borderRadius: '9999px',
+                    fontSize: '9px',
+                    fontWeight: 700,
+                    width: '14px',
+                    height: '14px',
+                    lineHeight: '1',
+                    marginLeft: '2px'
+                  }}
+                >
+                  {employeesWithTimesheetIds.size}
+                </span>
+              )}
+            </button>
+          )}
+
           {/* Thin divider between actions and filters */}
           <span style={{ width: '1px', height: '22px', background: '#e2e8f0', margin: '0 4px', flexShrink: 0 }} />
 
@@ -742,19 +1144,172 @@ export const Attendance: React.FC<{ dashboardMode?: boolean }> = ({ dashboardMod
             </div>
           )}
 
-          {/* Employee filter */}
+          {/* ── Multi-select Employee Filter ── */}
           {currentUser?.role !== 'Staff' && (
-            <Select value={employeeFilter} onValueChange={setEmployeeFilter}>
-              <SelectTrigger className="h-7 text-xs rounded-lg bg-slate-50 border-slate-200" style={{ width: '140px' }}>
-                <SelectValue placeholder="All Employees" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Employees</SelectItem>
-                {activeEmployees.map(emp => (
-                  <SelectItem key={emp.id} value={emp.id}>{emp.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Popover open={empDropdownOpen} onOpenChange={open => { setEmpDropdownOpen(open); if (!open) setEmpDropdownSearch(''); }}>
+              <PopoverTrigger asChild>
+                <button
+                  className="inline-flex items-center gap-1.5 text-xs rounded-lg transition-all hover:bg-slate-100 active:scale-95 relative"
+                  style={{
+                    height: '28px',
+                    minWidth: '140px',
+                    maxWidth: '200px',
+                    background: employeeFilter.length > 0 ? '#eff6ff' : '#f8fafc',
+                    border: employeeFilter.length > 0 ? '1px solid #93c5fd' : '1px solid #e2e8f0',
+                    color: employeeFilter.length > 0 ? '#1d4ed8' : '#334155',
+                    paddingLeft: '10px',
+                    paddingRight: '28px',
+                    fontWeight: employeeFilter.length > 0 ? 600 : 400,
+                    boxSizing: 'border-box',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }}
+                >
+                  <span className="truncate flex-1 text-left" style={{ fontSize: '11px' }}>
+                    {employeeFilter.length === 0
+                      ? 'All Employees'
+                      : employeeFilter.length === 1
+                      ? (activeEmployees.find(e => e.id === employeeFilter[0])?.name ?? 'Employee')
+                      : `${employeeFilter.length} Selected`}
+                  </span>
+                  {employeeFilter.length > 0 && (
+                    <span
+                      style={{
+                        position: 'absolute', right: '20px',
+                        background: '#1d4ed8', color: '#fff',
+                        borderRadius: '9999px', fontSize: '9px',
+                        fontWeight: 700, padding: '1px 5px', lineHeight: '14px'
+                      }}
+                    >
+                      {employeeFilter.length}
+                    </span>
+                  )}
+                  <ChevronDown
+                    className="h-3 w-3 shrink-0"
+                    style={{ position: 'absolute', right: '7px', color: '#94a3b8' }}
+                  />
+                </button>
+              </PopoverTrigger>
+
+              <PopoverContent
+                align="start"
+                sideOffset={4}
+                className="p-0 shadow-xl border border-slate-200 rounded-xl bg-white"
+                style={{ width: '240px', zIndex: 9999 }}
+              >
+                {/* Search box */}
+                <div className="px-2 pt-2 pb-1 border-b border-slate-100">
+                  <div className="relative flex items-center">
+                    <Search className="absolute left-2.5 h-3.5 w-3.5" style={{ color: '#94a3b8', pointerEvents: 'none' }} />
+                    <input
+                      autoFocus
+                      type="text"
+                      placeholder="Search employees..."
+                      value={empDropdownSearch}
+                      onChange={e => setEmpDropdownSearch(e.target.value)}
+                      className="w-full text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
+                      style={{
+                        height: '28px', boxSizing: 'border-box',
+                        background: '#f8fafc', border: '1px solid #e2e8f0',
+                        color: '#334155', paddingLeft: '28px', paddingRight: '8px',
+                        borderRadius: '8px', lineHeight: 'normal'
+                      }}
+                    />
+                    {empDropdownSearch && (
+                      <button onClick={() => setEmpDropdownSearch('')} className="absolute right-2" style={{ color: '#94a3b8' }}>
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Select All / Clear row */}
+                <div className="flex items-center justify-between px-3 py-1.5 border-b border-slate-100" style={{ background: '#f8fafc' }}>
+                  <button
+                    onClick={() => setEmployeeFilter(activeEmployees.map(e => e.id))}
+                    className="text-[10px] font-semibold hover:underline"
+                    style={{ color: '#1d4ed8' }}
+                  >
+                    Select All
+                  </button>
+                  <span style={{ color: '#e2e8f0', fontSize: '12px' }}>|</span>
+                  <button
+                    onClick={() => setEmployeeFilter([])}
+                    className="text-[10px] font-semibold hover:underline"
+                    style={{ color: employeeFilter.length > 0 ? '#dc2626' : '#94a3b8' }}
+                  >
+                    Clear
+                  </button>
+                </div>
+
+                {/* All Employees option */}
+                <div
+                  onClick={() => setEmployeeFilter([])}
+                  className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-blue-50 transition-colors"
+                  style={{ borderBottom: '1px solid #f1f5f9' }}
+                >
+                  <div
+                    className="h-4 w-4 rounded flex items-center justify-center shrink-0"
+                    style={{
+                      border: employeeFilter.length === 0 ? '2px solid #1d4ed8' : '2px solid #cbd5e1',
+                      background: employeeFilter.length === 0 ? '#1d4ed8' : 'transparent'
+                    }}
+                  >
+                    {employeeFilter.length === 0 && <Check className="h-2.5 w-2.5 text-white" />}
+                  </div>
+                  <span className="text-xs font-semibold" style={{ color: '#1e293b' }}>All Employees</span>
+                  <span className="ml-auto text-[10px]" style={{ color: '#94a3b8' }}>{activeEmployees.length}</span>
+                </div>
+
+                {/* Employee list */}
+                <div style={{ maxHeight: '220px', overflowY: 'auto' }}>
+                  {dropdownEmployees.length === 0 ? (
+                    <div className="py-6 text-center text-xs" style={{ color: '#94a3b8' }}>No employees found</div>
+                  ) : (
+                    dropdownEmployees.map(emp => {
+                      const isChecked = employeeFilter.includes(emp.id);
+                      return (
+                        <div
+                          key={emp.id}
+                          onClick={() => toggleEmployeeFilter(emp.id)}
+                          className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-slate-50 transition-colors"
+                        >
+                          <div
+                            className="h-4 w-4 rounded flex items-center justify-center shrink-0"
+                            style={{
+                              border: isChecked ? '2px solid #1d4ed8' : '2px solid #cbd5e1',
+                              background: isChecked ? '#1d4ed8' : 'transparent',
+                              transition: 'all 0.15s'
+                            }}
+                          >
+                            {isChecked && <Check className="h-2.5 w-2.5 text-white" />}
+                          </div>
+                          <div className="flex flex-col min-w-0">
+                            <span className="text-xs font-medium truncate" style={{ color: '#1e293b' }}>{emp.name}</span>
+                            <span className="text-[10px] font-mono" style={{ color: '#94a3b8' }}>{emp.eid}</span>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+
+                {/* Footer */}
+                <div className="px-3 py-2 border-t border-slate-100 flex items-center justify-between" style={{ background: '#f8fafc' }}>
+                  <span className="text-[10px]" style={{ color: '#64748b' }}>
+                    {employeeFilter.length === 0 ? 'Showing all' : `${employeeFilter.length} selected`}
+                  </span>
+                  <button
+                    onClick={() => setEmpDropdownOpen(false)}
+                    className="text-[10px] font-semibold px-2.5 py-1 rounded-md transition-all"
+                    style={{ background: '#1d4ed8', color: '#fff' }}
+                  >
+                    Done
+                  </button>
+                </div>
+              </PopoverContent>
+            </Popover>
           )}
 
           {/* Month */}
@@ -799,10 +1354,10 @@ export const Attendance: React.FC<{ dashboardMode?: boolean }> = ({ dashboardMod
       )}
 
       {/* ══ Main Attendance Grid ══ */}
-      <div id="attendance-print-area" className={`${dashboardMode ? '' : 'flex-1 min-h-0'} rounded-xl overflow-hidden flex flex-col print:border-none print:shadow-none`} style={{ border: '1px solid #e2e8f0', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
+      <div id="attendance-print-area" className={`${dashboardMode ? '' : 'flex-1 min-h-0'} rounded-xl overflow-hidden flex flex-col print:border-none print:shadow-none print:overflow-visible print:flex-none print:block`} style={{ border: '1px solid #e2e8f0', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
 
-        {/* Scroll Container — full-width fixed layout so ALL days fill the viewport */}
-        <div className="flex-1 overflow-y-auto overflow-x-hidden">
+        {/* Scroll Container */}
+        <div className="flex-1 overflow-y-auto overflow-x-hidden print:overflow-visible print:flex-none print-scroll-container">
           <table
             className="border-collapse text-left select-none"
             style={{ width: '100%', tableLayout: 'fixed' }}
@@ -888,17 +1443,24 @@ export const Attendance: React.FC<{ dashboardMode?: boolean }> = ({ dashboardMod
                 })}
 
 
-                {/* Summary columns */}
-                {['L','A','D','Lates','Bonus'].map(col => (
-                  <th key={col} style={{
+                {/* Summary columns with tooltips */}
+                {([
+                  { key: 'L', label: 'L', title: 'Leave Days — Total approved leave days taken' },
+                  { key: 'A', label: 'A', title: 'Present Days — Total days attended (including late)' },
+                  { key: 'D', label: 'D', title: 'Working Days — Total scheduled working days this month' },
+                  { key: 'Lates', label: 'Lates', title: 'Total Late Minutes — Sum of all late arrivals in minutes' },
+                  { key: 'Bonus', label: 'Bonus', title: 'Bonus Eligibility — Yes if zero lates and zero leaves' },
+                ] as { key: string; label: string; title: string }[]).map(col => (
+                  <th key={col.key} title={col.title} style={{
                     padding: '10px 4px',
                     textAlign: 'center',
-                    borderLeft: col === 'L' ? '2px solid #e2e8f0' : '1px solid #e2e8f0',
+                    borderLeft: col.key === 'L' ? '2px solid #e2e8f0' : '1px solid #e2e8f0',
                     fontSize: '10px', fontWeight: 700,
-                    color: col === 'A' ? '#ef4444' : col === 'L' ? '#8b5cf6' : col === 'D' ? '#10b981' : col === 'Bonus' ? '#f59e0b' : '#64748b',
+                    color: col.key === 'A' ? '#ef4444' : col.key === 'L' ? '#8b5cf6' : col.key === 'D' ? '#10b981' : col.key === 'Bonus' ? '#f59e0b' : '#64748b',
                     background: '#f8fafc', textTransform: 'uppercase',
-                    overflow: 'hidden'
-                  }}>{col}</th>
+                    overflow: 'hidden',
+                    cursor: 'help'
+                  }}>{col.label}</th>
                 ))}
               </tr>
             </thead>
@@ -1041,50 +1603,64 @@ export const Attendance: React.FC<{ dashboardMode?: boolean }> = ({ dashboardMod
                         );
                       })}
 
-                      {/* L, A, D, Lates summary cells */}
                       {/* L = leaves */}
-                      <td style={{
-                        textAlign: 'center',
-                        borderLeft: '2px solid #e2e8f0',
-                        borderRight: '1px solid #f1f5f9',
-                        background: rowBg,
-                        fontSize: '11px', fontWeight: 700,
-                        color: leave > 0 ? '#8b5cf6' : '#cbd5e1'
-                      }}>{leave > 0 ? leave : '—'}</td>
+                      <td
+                        title={`Leave Days: ${leave > 0 ? leave + ' day(s) of approved leave' : 'No leaves taken'}`}
+                        style={{
+                          textAlign: 'center',
+                          borderLeft: '2px solid #e2e8f0',
+                          borderRight: '1px solid #f1f5f9',
+                          background: rowBg,
+                          fontSize: '11px', fontWeight: 700,
+                          color: leave > 0 ? '#8b5cf6' : '#cbd5e1',
+                          cursor: 'help'
+                        }}>{leave > 0 ? leave : '—'}</td>
                       {/* A = attend */}
-                      <td style={{
-                        textAlign: 'center',
-                        borderRight: '1px solid #f1f5f9',
-                        background: rowBg,
-                        fontSize: '11px', fontWeight: 700,
-                        color: present > 0 ? '#ef4444' : '#cbd5e1'
-                      }}>{present > 0 ? present : '—'}</td>
+                      <td
+                        title={`Present Days: ${present > 0 ? present + ' day(s) attended (incl. late days)' : 'No attendance recorded'}`}
+                        style={{
+                          textAlign: 'center',
+                          borderRight: '1px solid #f1f5f9',
+                          background: rowBg,
+                          fontSize: '11px', fontWeight: 700,
+                          color: present > 0 ? '#ef4444' : '#cbd5e1',
+                          cursor: 'help'
+                        }}>{present > 0 ? present : '—'}</td>
                       {/* D = working days */}
-                      <td style={{
-                        textAlign: 'center',
-                        borderRight: '1px solid #f1f5f9',
-                        background: rowBg,
-                        fontSize: '11px', fontWeight: 700,
-                        color: workingDays > 0 ? '#10b981' : '#cbd5e1'
-                      }}>{workingDays > 0 ? workingDays : '—'}</td>
+                      <td
+                        title={`Working Days: ${workingDays} scheduled working days this month`}
+                        style={{
+                          textAlign: 'center',
+                          borderRight: '1px solid #f1f5f9',
+                          background: rowBg,
+                          fontSize: '11px', fontWeight: 700,
+                          color: workingDays > 0 ? '#10b981' : '#cbd5e1',
+                          cursor: 'help'
+                        }}>{workingDays > 0 ? workingDays : '—'}</td>
                       {/* Lates total */}
-                      <td style={{
-                        textAlign: 'center',
-                        borderRight: '1px solid #f1f5f9',
-                        background: rowBg,
-                        fontSize: '11px', fontWeight: 700,
-                        color: lates > 0 ? '#ef4444' : '#cbd5e1',
-                        overflow: 'hidden'
-                      }}>{lates > 0 ? lates : '—'}</td>
+                      <td
+                        title={`Total Late Minutes: ${lates > 0 ? lates + ' minutes late in total this month' : 'No late arrivals'}`}
+                        style={{
+                          textAlign: 'center',
+                          borderRight: '1px solid #f1f5f9',
+                          background: rowBg,
+                          fontSize: '11px', fontWeight: 700,
+                          color: lates > 0 ? '#ef4444' : '#cbd5e1',
+                          overflow: 'hidden',
+                          cursor: 'help'
+                        }}>{lates > 0 ? lates : '—'}</td>
                       {/* Bonus Eligibility */}
-                      <td style={{
-                        textAlign: 'center',
-                        borderRight: '1px solid #f1f5f9',
-                        background: rowBg,
-                        fontSize: '11px', fontWeight: 700,
-                        color: (lates === 0 && leave === 0) ? '#10b981' : '#ef4444',
-                        overflow: 'hidden'
-                      }}>{(lates === 0 && leave === 0) ? 'Yes' : 'No'}</td>
+                      <td
+                        title={`Bonus Eligibility: ${(lates === 0 && leave === 0) ? 'Eligible — No lates and no leaves this month' : `Not eligible — ${lates > 0 ? lates + ' min late' : ''}${lates > 0 && leave > 0 ? ', ' : ''}${leave > 0 ? leave + ' leave day(s)' : ''}`}`}
+                        style={{
+                          textAlign: 'center',
+                          borderRight: '1px solid #f1f5f9',
+                          background: rowBg,
+                          fontSize: '11px', fontWeight: 700,
+                          color: (lates === 0 && leave === 0) ? '#10b981' : '#ef4444',
+                          overflow: 'hidden',
+                          cursor: 'help'
+                        }}>{(lates === 0 && leave === 0) ? 'Yes' : 'No'}</td>
 
                     </tr>
                   );

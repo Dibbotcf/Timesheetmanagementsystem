@@ -63,7 +63,9 @@ export const SystemManual: React.FC = () => {
                             <li><strong>Session Security:</strong> Sessions persist for 24 hours. Always use the Logout button when on a shared computer.</li>
                         </ul>
                     </div>
-                    <MockupLogin />
+                    <div className="flex justify-center items-center">
+                        <img src="/screenshots/manual_login.png" alt="Login Screen" className="rounded-xl shadow-lg border max-w-sm w-full" />
+                    </div>
                 </div>
             </section>
 
@@ -73,7 +75,7 @@ export const SystemManual: React.FC = () => {
             <section id="dashboard" className="scroll-mt-20">
                 <SectionHeader number="2" title="Dashboard Overview" icon={LayoutDashboard} color="bg-purple-100 text-purple-700" />
                 <div className="grid lg:grid-cols-2 gap-8 mt-6">
-                    <MockupDashboard />
+                    <img src="/screenshots/manual_dashboard.png" alt="Dashboard" className="rounded-xl shadow-lg border w-full object-cover object-left-top" />
                     <div className="space-y-4 text-gray-600">
                         <p>The Dashboard acts as the central hub for all activities.</p>
                         <div className="space-y-4">
@@ -115,7 +117,7 @@ export const SystemManual: React.FC = () => {
                             <li><strong>Status:</strong> Deactivate employees who have left the company to preserve their historical data without allowing login access.</li>
                         </ol>
                     </div>
-                    <MockupEmployeeTable />
+                    <img src="/screenshots/manual_employees.png" alt="Employee Management" className="rounded-xl shadow-lg border w-full object-cover object-left-top" />
                 </div>
             </section>
 
@@ -125,7 +127,7 @@ export const SystemManual: React.FC = () => {
             <section id="templates" className="scroll-mt-20">
                 <SectionHeader number="4" title="Monthly Templates & Holidays" icon={File} color="bg-indigo-100 text-indigo-700" />
                 <div className="grid lg:grid-cols-2 gap-8 mt-6">
-                    <MockupCalendar />
+                    <img src="/screenshots/manual_templates.png" alt="Month Templates" className="rounded-xl shadow-lg border w-full object-cover object-left-top" />
                     <div className="space-y-4 text-gray-600">
                         <p className="font-medium text-indigo-900">Critical Step for Timesheet Accuracy</p>
                         <p>Before any employee can create a timesheet for a new month, an Admin must set up the <strong>Month Template</strong>.</p>
@@ -159,7 +161,7 @@ export const SystemManual: React.FC = () => {
                                 <li><strong>Signatures:</strong> Admins can attach digital signatures for "Checked By" and "Approved By".</li>
                             </ol>
                         </div>
-                        <MockupTimesheetGrid />
+                        <img src="/screenshots/manual_timesheets.png" alt="Timesheets Grid" className="rounded-xl shadow-lg border w-full object-cover object-left-top" />
                     </div>
 
                     {/* Printing Phase */}
@@ -196,7 +198,7 @@ export const SystemManual: React.FC = () => {
             <section id="leaves" className="scroll-mt-20">
                 <SectionHeader number="6" title="Leave Management" icon={Calendar} color="bg-pink-100 text-pink-700" />
                 <div className="grid lg:grid-cols-2 gap-8 mt-6">
-                    <MockupLeaveCard />
+                    <img src="/screenshots/manual_leaves.png" alt="Leave Management" className="rounded-xl shadow-lg border w-full object-cover object-left-top" />
                     <div className="space-y-4 text-gray-600">
                         <div className="space-y-3">
                             <h4 className="font-bold text-pink-900">For Staff:</h4>
@@ -283,7 +285,7 @@ export const SystemManual: React.FC = () => {
     );
 };
 
-/* --- Subcomponents for Styling & Mockups --- */
+/* --- Subcomponents for Styling --- */
 
 const SectionHeader: React.FC<{ number: string; title: string; icon: any; color: string }> = ({ number, title, icon: Icon, color }) => (
     <div className="flex items-center gap-4">
@@ -293,174 +295,5 @@ const SectionHeader: React.FC<{ number: string; title: string; icon: any; color:
         <h2 className="text-2xl font-bold text-gray-900">
             <span className="text-gray-400 mr-2">#{number}</span>{title}
         </h2>
-    </div>
-);
-
-// 1. Login Mockup
-const MockupLogin = () => (
-    <div className="bg-white p-6 rounded-lg shadow-lg border max-w-sm mx-auto w-full">
-        <div className="text-center mb-6">
-            <div className="h-8 w-8 bg-blue-600 rounded-full mx-auto mb-2"></div>
-            <div className="font-bold text-gray-800">Sign In</div>
-        </div>
-        <div className="space-y-3">
-            <div className="h-9 bg-gray-100 rounded border w-full flex items-center px-3 text-xs text-gray-400">email@company.com</div>
-            <div className="h-9 bg-gray-100 rounded border w-full flex items-center px-3 text-xs text-gray-400">••••••••</div>
-            <div className="h-9 bg-blue-600 rounded w-full flex items-center justify-center text-white text-xs font-bold">Login</div>
-        </div>
-    </div>
-);
-
-// 2. Dashboard Mockup
-const MockupDashboard = () => (
-    <div className="bg-slate-100 p-4 rounded-lg border shadow-inner">
-        <div className="flex gap-4 mb-4">
-            <div className="w-16 h-full bg-white rounded-lg border shadow-sm flex flex-col items-center py-2 gap-2">
-                <div className="h-4 w-4 bg-blue-200 rounded"></div>
-                <div className="h-4 w-4 bg-gray-200 rounded"></div>
-                <div className="h-4 w-4 bg-gray-200 rounded"></div>
-            </div>
-            <div className="flex-1 space-y-3">
-                <div className="flex gap-3">
-                    <div className="flex-1 bg-white h-20 rounded-lg border p-3 shadow-sm">
-                        <div className="h-2 w-12 bg-blue-100 rounded mb-2"></div>
-                        <div className="h-6 w-8 bg-gray-800 rounded"></div>
-                    </div>
-                    <div className="flex-1 bg-white h-20 rounded-lg border p-3 shadow-sm">
-                        <div className="h-2 w-12 bg-purple-100 rounded mb-2"></div>
-                        <div className="h-6 w-8 bg-gray-800 rounded"></div>
-                    </div>
-                </div>
-                <div className="bg-white h-24 rounded-lg border p-3 shadow-sm">
-                    <div className="h-3 w-24 bg-gray-200 rounded mb-2"></div>
-                    <div className="space-y-2">
-                        <div className="h-2 w-full bg-gray-50 rounded"></div>
-                        <div className="h-2 w-3/4 bg-gray-50 rounded"></div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        <div className="text-center text-xs text-gray-400 font-mono mt-2">System Dashboard Preview</div>
-    </div>
-);
-
-// 3. Employee Table Mockup
-const MockupEmployeeTable = () => (
-    <div className="bg-white border rounded-lg shadow-sm overflow-hidden">
-        <div className="bg-gray-50 px-4 py-2 border-b flex justify-between items-center">
-            <div className="text-xs font-bold text-gray-600">Employees</div>
-            <div className="h-5 w-16 bg-blue-600 rounded text-[10px] text-white flex items-center justify-center">Add New</div>
-        </div>
-        <table className="w-full text-xs text-left">
-            <thead>
-                <tr className="border-b bg-gray-50/50">
-                    <th className="p-2 font-medium text-gray-500">Name</th>
-                    <th className="p-2 font-medium text-gray-500">Role</th>
-                    <th className="p-2 font-medium text-gray-500">Status</th>
-                </tr>
-            </thead>
-            <tbody className="text-gray-600">
-                <tr className="border-b">
-                    <td className="p-2">John Doe</td>
-                    <td className="p-2">Admin</td>
-                    <td className="p-2 text-green-600">Active</td>
-                </tr>
-                <tr className="border-b">
-                    <td className="p-2">Jane Smith</td>
-                    <td className="p-2">Staff</td>
-                    <td className="p-2 text-green-600">Active</td>
-                </tr>
-                <tr>
-                    <td className="p-2">Bob Wilson</td>
-                    <td className="p-2">Staff</td>
-                    <td className="p-2 text-red-500">Inactive</td>
-                </tr>
-            </tbody>
-        </table>
-    </div>
-);
-
-// 4. Calendar Mockup
-const MockupCalendar = () => (
-    <div className="bg-white p-4 rounded-lg border shadow-sm">
-        <div className="flex justify-between mb-3">
-            <div className="text-sm font-bold">October 2023</div>
-            <div className="text-xs text-gray-400">Template Setup</div>
-        </div>
-        <div className="grid grid-cols-7 gap-1 text-center mb-1">
-            {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => (
-                <div key={i} className="text-[10px] text-gray-400 font-bold">{d}</div>
-            ))}
-        </div>
-        <div className="grid grid-cols-7 gap-1">
-            {Array.from({ length: 31 }).map((_, i) => {
-                const isWeekend = (i + 1) % 7 === 0 || (i + 1) % 7 === 1;
-                const isHoliday = i === 14; // Mock holiday
-                return (
-                    <div key={i} className={`h-6 rounded-sm flex items-center justify-center text-[10px] 
-                        ${isHoliday ? 'bg-red-100 text-red-700 font-bold' : isWeekend ? 'bg-gray-100 text-gray-500' : 'bg-white border text-gray-700'}`}>
-                        {i + 1}
-                    </div>
-                )
-            })}
-        </div>
-        <div className="mt-3 flex gap-3 text-[10px] text-gray-500">
-            <div className="flex items-center gap-1"><div className="w-2 h-2 bg-gray-100 rounded-full"></div>Weekend</div>
-            <div className="flex items-center gap-1"><div className="w-2 h-2 bg-red-100 rounded-full"></div>Holiday</div>
-        </div>
-    </div>
-);
-
-// 5. Timesheet Grid Mockup
-const MockupTimesheetGrid = () => (
-    <div className="border rounded-lg overflow-hidden bg-white shadow-sm text-xs">
-        <div className="bg-gray-800 text-white p-2 flex justify-between">
-            <span>Edit Timesheet</span>
-            <span>Oct 2023</span>
-        </div>
-        <div className="grid grid-cols-4 gap-px bg-gray-200 p-px">
-            <div className="bg-gray-100 p-1 font-bold">Date</div>
-            <div className="bg-gray-100 p-1 font-bold">In</div>
-            <div className="bg-gray-100 p-1 font-bold">Out</div>
-            <div className="bg-gray-100 p-1 font-bold">Check</div>
-
-            {/* Row 1 */}
-            <div className="bg-white p-1">01 (Sun)</div>
-            <div className="bg-gray-50 p-1 text-gray-400">-</div>
-            <div className="bg-gray-50 p-1 text-gray-400">-</div>
-            <div className="bg-white p-1 text-center">WK</div>
-
-            {/* Row 2 */}
-            <div className="bg-white p-1">02 (Mon)</div>
-            <div className="bg-blue-50 p-1 text-blue-800">09:00</div>
-            <div className="bg-blue-50 p-1 text-blue-800">18:00</div>
-            <div className="bg-white p-1 text-center">✓</div>
-
-            {/* Row 3 */}
-            <div className="bg-white p-1">03 (Tue)</div>
-            <div className="bg-blue-50 p-1 text-blue-800">09:15</div>
-            <div className="bg-blue-50 p-1 text-blue-800">18:30</div>
-            <div className="bg-white p-1 text-center">✓</div>
-        </div>
-    </div>
-);
-
-// 6. Leave Card Mockup
-const MockupLeaveCard = () => (
-    <div className="border rounded-lg bg-white p-4 shadow-sm max-w-sm">
-        <div className="flex justify-between items-start mb-3">
-            <div>
-                <div className="text-sm font-bold">Sick Leave</div>
-                <div className="text-xs text-gray-500">Nov 12 - Nov 13</div>
-            </div>
-            <div className="bg-yellow-100 text-yellow-700 text-[10px] px-2 py-1 rounded-full font-bold">Pending</div>
-        </div>
-        <div className="text-xs text-gray-600 bg-gray-50 p-2 rounded mb-3">
-            "Feeling unwell, visiting doctor."
-        </div>
-        <div className="flex gap-2">
-            <div className="h-6 flex-1 bg-green-600 rounded flex items-center justify-center text-white text-xs font-medium opacity-50">Approve</div>
-            <div className="h-6 flex-1 bg-red-100 text-red-600 rounded flex items-center justify-center text-xs font-medium opacity-50">Reject</div>
-        </div>
     </div>
 );

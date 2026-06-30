@@ -4,7 +4,9 @@ import { calcLateMinutes } from '../components/PrintableTimesheet';
 import { parseISO, format, eachDayOfInterval, isWeekend, startOfMonth, endOfMonth, differenceInYears } from 'date-fns';
 import { Users, Calendar, ChartBar, Leaf, Clock, CalendarCheck, Check, Percent, Moon, AlertCircle, Table, Coffee, Heart, MoreHorizontal, List } from 'lucide-react';
 import { Button } from '../components/ui/button';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Printer, Download, Loader2 } from 'lucide-react';
+import html2canvas from 'html2canvas';
+
 
 // Standard Tailwind mapping for custom badges
 const BADGES = {
@@ -33,8 +35,175 @@ export const EmployeeRecordsReport: React.FC<{ onBack: () => void }> = ({ onBack
   
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
   const [selectedMonth, setSelectedMonth] = useState<number>(new Date().getMonth());
-  const [activeTab, setActiveTab] = useState<'monthly' | 'yearly' | 'leaves'>('monthly');
+  const [activeTab, setActiveTab] = useState<'monthly' | 'yearly' | 'leaves' | 'timesheet'>('monthly');
   const [selectedEmpIndex, setSelectedEmpIndex] = useState<number>(0);
+
+  const [isDownloading, setIsDownloading] = useState(false);
+
+  const handleDownloadPdf = async () => {
+    if (!selectedEmp || !twelveMonthsData) return;
+    setIsDownloading(true);
+    try {
+      // Create off-screen container for pure HTML generation
+      const container = document.createElement('div');
+      container.style.cssText = 'position:fixed; top:-9999px; left:-9999px; width:1400px; background:#fff; padding:20px; box-sizing:border-box; font-family:sans-serif;';
+
+      // Title & Employee Info
+      const headerDiv = document.createElement('div');
+      headerDiv.style.cssText = 'text-align:center; margin-bottom:20px; font-family:Georgia,serif;';
+      headerDiv.innerHTML = `
+        <div style="font-size:24px; font-weight:bold; color:#000; margin-bottom:8px;">Tokyo Consulting Firm Limited</div>
+        <div style="font-size:16px; font-weight:bold; color:#333; margin-bottom:12px;">12 Months Timesheet Report &mdash; ${selectedYear}</div>
+        <div style="display:inline-block; border:1px solid #000; padding:8px 40px; background:#f9fafb; font-size:13px; font-weight:bold; font-family:sans-serif; color:#000;">
+          Employee Name: <span style="font-weight:normal; margin-right:30px;">${selectedEmp.name}</span>
+          Employee ID: <span style="font-weight:normal;">${selectedEmp.eid}</span>
+        </div>
+      `;
+      container.appendChild(headerDiv);
+
+      // Table construction
+      const table = document.createElement('table');
+      table.style.cssText = 'width:100%; border-collapse:collapse; font-size:11px; text-align:center;';
+      
+      // Thead
+      const thead = document.createElement('thead');
+      const trHead = document.createElement('tr');
+      trHead.style.cssText = 'background:#f8fafc; color:#475569; font-weight:bold; font-size:10px; border:1px solid #cbd5e1;';
+      
+      const thMonth = document.createElement('th');
+      thMonth.style.cssText = 'padding:8px 4px; border:1px solid #e2e8f0; width:60px; text-align:left;';
+      thMonth.textContent = 'MONTH';
+      trHead.appendChild(thMonth);
+
+      for (let i = 1; i <= 31; i++) {
+        const thDay = document.createElement('th');
+        thDay.style.cssText = 'padding:8px 2px; border:1px solid #e2e8f0; width:28px;';
+        thDay.textContent = String(i);
+        trHead.appendChild(thDay);
+      }
+
+      ['L', 'A', 'D', 'Lates', 'Bonus'].forEach(lbl => {
+        const thSum = document.createElement('th');
+        thSum.style.cssText = 'padding:8px 2px; border:1px solid #e2e8f0; width:35px;';
+        thSum.textContent = lbl;
+        trHead.appendChild(thSum);
+      });
+      thead.appendChild(trHead);
+      table.appendChild(thead);
+
+      // Tbody
+      const tbody = document.createElement('tbody');
+      twelveMonthsData.forEach((md, i) => {
+        const tr = document.createElement('tr');
+        tr.style.cssText = 'border-bottom:1px solid #e2e8f0;';
+        
+        const tdMonth = document.createElement('td');
+        tdMonth.style.cssText = 'padding:6px 4px; border:1px solid #e2e8f0; text-align:left; font-weight:bold; color:#0f172a;';
+        tdMonth.textContent = md.monthName;
+        tr.appendChild(tdMonth);
+
+        for (let day = 1; day <= 31; day++) {
+          const td = document.createElement('td');
+          td.style.cssText = 'padding:4px 2px; border:1px solid #e2e8f0; vertical-align:middle;';
+          
+          if (day > md.totalDays) {
+            td.style.backgroundColor = '#f8fafc';
+            td.innerHTML = '&nbsp;';
+          } else {
+            const status = md.dayStatuses[day];
+            if (!status) {
+              td.innerHTML = '<span style="color:#cbd5e1;">&mdash;</span>';
+            } else if (status.isWeekend || status.isHoliday) {
+              td.style.backgroundColor = '#f0f9ff';
+              td.innerHTML = status.isHoliday ? '<span style="color:#3b82f6; font-weight:bold; font-size:10px;">H</span>' : '&mdash;';
+              td.style.color = '#94a3b8';
+            } else if (status.isLeave && !(status.inTime || status.outTime)) {
+              td.style.backgroundColor = '#fdf2f8';
+              td.innerHTML = `<span style="color:#db2777; font-weight:bold; font-size:10px;">${status.leaveCode || 'L'}</span>`;
+            } else if (status.inTime || status.outTime) {
+              td.style.backgroundColor = (status.late && status.late > 0) ? '#fff1f2' : '#f0fdf4';
+              let content = '';
+              if (status.inTime) {
+                content += `<div style="color:#0f766e; font-size:8px;">${status.inTime}</div>`;
+              }
+              if (status.outTime) {
+                content += `<div style="color:#475569; font-size:8px;">${status.outTime}</div>`;
+              }
+              if (status.late && status.late > 0) {
+                content += `<div style="color:#e11d48; font-size:7px; font-weight:bold;">${status.late}m</div>`;
+              }
+              td.innerHTML = content;
+            } else {
+              td.innerHTML = '<span style="color:#cbd5e1;">&mdash;</span>';
+            }
+          }
+          tr.appendChild(td);
+        }
+
+        if (md.hasData) {
+          const makeTd = (val: any, color: string, isBg = false) => {
+            const td = document.createElement('td');
+            td.style.cssText = `padding:6px 2px; border:1px solid #e2e8f0; font-weight:bold; font-size:10px; color:${color}; ${isBg ? ('background-color:' + (val==='Yes'?'#d1fae5':'#ffe4e6') + ';') : ''}`;
+            td.textContent = val;
+            return td;
+          };
+          tr.appendChild(makeTd(md.leaveDaysCount > 0 ? md.leaveDaysCount : '-', '#7e22ce'));
+          tr.appendChild(makeTd(md.presentDays > 0 ? md.presentDays : '-', '#e11d48'));
+          tr.appendChild(makeTd(md.workingDays, '#16a34a'));
+          tr.appendChild(makeTd(md.totalLates > 0 ? `${md.totalLates}m` : '-', '#475569'));
+          tr.appendChild(makeTd(md.bonusEligible ? 'Yes' : 'No', md.bonusEligible ? '#065f46' : '#9f1239', true));
+        } else {
+          for (let i=0; i<5; i++) {
+            const td = document.createElement('td');
+            td.style.cssText = 'padding:6px 2px; border:1px solid #e2e8f0; color:#cbd5e1;';
+            td.textContent = '-';
+            tr.appendChild(td);
+          }
+        }
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      container.appendChild(table);
+
+      // Legend
+      const legendDiv = document.createElement('div');
+      legendDiv.style.cssText = 'text-align:center; margin-top:15px; font-size:11px; color:#64748b; font-weight:500; font-family:sans-serif;';
+      legendDiv.textContent = 'L = Leave Days · A = Present Days · D = Working Days · C = Casual · S = Sick · AL = Annual · H = Holiday';
+      container.appendChild(legendDiv);
+
+      document.body.appendChild(container);
+      await new Promise(resolve => setTimeout(resolve, 200)); // Paint
+      
+      const canvas = await html2canvas(container, { scale: 2 });
+      const imgData = canvas.toDataURL('image/jpeg', 0.95);
+      document.body.removeChild(container);
+
+      const { jsPDF } = await import('jspdf');
+      const pdf = new jsPDF('landscape', 'mm', 'a4');
+      
+      const pageWidth = 297;
+      const pageHeight = 210;
+      const margins = 10;
+      
+      const finalW = pageWidth - (margins * 2);
+      const ratio = canvas.height / canvas.width;
+      const finalH = finalW * ratio;
+      
+      // Top align with slight margin
+      const startY = 10;
+
+      pdf.addImage(imgData, 'JPEG', margins, startY, finalW, finalH);
+      pdf.save(`Timesheet_${selectedEmp.name}_${selectedYear}.pdf`);
+      
+    } catch (err: any) {
+      console.error(err);
+      alert('PDF failed: ' + (err?.message || String(err)));
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+
 
   const activeEmployees = useMemo(() => {
     if (!employees) return [];
@@ -272,6 +441,132 @@ export const EmployeeRecordsReport: React.FC<{ onBack: () => void }> = ({ onBack
       return res.sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
   }, [leaves, selectedEmp, selectedYear]);
 
+  const twelveMonthsData = useMemo(() => {
+    if (!selectedEmp) return [];
+    
+    return MONTHS.map((monthName, mIdx) => {
+      const ts = timesheets.find(t => t.employeeId === selectedEmp.id && t.year === selectedYear && t.month === mIdx);
+      const tmpl = getTemplate(selectedYear, mIdx);
+      
+      const mStart = new Date(selectedYear, mIdx, 1);
+      const daysInMonthObj = eachDayOfInterval({ start: mStart, end: endOfMonth(mStart) });
+      const totalDays = daysInMonthObj.length;
+      
+      const approvedLeaves = leaves.filter(l => {
+        if (l.employeeId !== selectedEmp.id || l.status !== 'Approved') return false;
+        if (l.partialHours && l.partialHours > 0) return false;
+        const s = parseISO(l.startDate);
+        const e = parseISO(l.endDate);
+        const sm = new Date(selectedYear, mIdx, 1);
+        const em = endOfMonth(sm);
+        return s <= em && e >= sm;
+      });
+      
+      const dayStatuses: Record<number, {
+        inTime?: string;
+        outTime?: string;
+        late?: number;
+        isWeekend?: boolean;
+        isHoliday?: boolean;
+        holidayReason?: string;
+        leaveCode?: string;
+        leaveType?: string;
+        isLeave?: boolean;
+        leaveDays?: number;
+      }> = {};
+      
+      daysInMonthObj.forEach(d => {
+        const dayNum = d.getDate();
+        const isWknd = tmpl ? false : isWeekend(d);
+        const holEntry = tmpl?.holidays?.find(h => h.date === dayNum);
+        const isHol = !!holEntry;
+        
+        dayStatuses[dayNum] = {
+          isWeekend: isWknd || (holEntry && holEntry.reason.toLowerCase().includes('weekly holiday')),
+          isHoliday: isHol && !holEntry.reason.toLowerCase().includes('weekly holiday'),
+          holidayReason: holEntry?.reason
+        };
+      });
+      
+      approvedLeaves.forEach(l => {
+        const s = parseISO(l.startDate);
+        const e = parseISO(l.endDate);
+        const mStartDay = new Date(selectedYear, mIdx, 1);
+        const mEndDay = endOfMonth(mStartDay);
+        const actualStart = s < mStartDay ? mStartDay : s;
+        const actualEnd = e > mEndDay ? mEndDay : e;
+        const span = eachDayOfInterval({ start: actualStart, end: actualEnd });
+        
+        const leaveCode = l.type === 'Casual' ? 'C' : l.type === 'Sick' ? 'S' : l.type === 'Annual' ? 'AL' : 'L';
+        
+        span.forEach(d => {
+          const dayNum = d.getDate();
+          if (dayStatuses[dayNum]) {
+            dayStatuses[dayNum].isLeave = true;
+            dayStatuses[dayNum].leaveCode = leaveCode;
+            dayStatuses[dayNum].leaveType = l.type;
+            dayStatuses[dayNum].leaveDays = l.days;
+          }
+        });
+      });
+      
+      let presentDays = 0;
+      let totalLates = 0;
+      let workingDays = 0;
+      let leaveDaysCount = 0;
+      
+      if (ts && ts.entries) {
+        ts.entries.forEach(ent => {
+          const dayNum = ent.date;
+          if (dayStatuses[dayNum]) {
+            dayStatuses[dayNum].inTime = ent.inTime;
+            dayStatuses[dayNum].outTime = ent.outTime;
+            if (ent.late) {
+              dayStatuses[dayNum].late = parseInt(ent.late, 10);
+            }
+          }
+        });
+      }
+      
+      daysInMonthObj.forEach(d => {
+        const dayNum = d.getDate();
+        const status = dayStatuses[dayNum];
+        
+        const isOff = status.isWeekend || status.isHoliday;
+        if (!isOff) {
+          workingDays++;
+        }
+        
+        if (status.isLeave) {
+          leaveDaysCount += (status.leaveDays === 0.5 ? 0.5 : 1);
+        }
+        
+        if (status.inTime && status.outTime && status.inTime.trim() !== '' && status.outTime.trim() !== '') {
+          presentDays++;
+          if (status.late && status.late > 0) {
+            totalLates += status.late;
+          }
+        }
+      });
+      
+      const bonusEligible = totalLates === 0 && leaveDaysCount === 0 && presentDays > 0;
+      
+      return {
+        monthName,
+        monthIdx: mIdx,
+        dayStatuses,
+        totalDays,
+        presentDays,
+        leaveDaysCount,
+        workingDays,
+        totalLates,
+        bonusEligible,
+        hasData: !!ts
+      };
+    });
+  }, [selectedEmp, selectedYear, timesheets, getTemplate, leaves]);
+
+
 
   if (!selectedEmp) {
     return (
@@ -405,6 +700,12 @@ export const EmployeeRecordsReport: React.FC<{ onBack: () => void }> = ({ onBack
                   className={`px-4 py-2 text-sm font-medium rounded-md transition-all flex items-center gap-2 ${activeTab === 'leaves' ? 'bg-white text-gray-900 border border-gray-200 shadow-sm' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-100/50'}`}
                 >
                     <Leaf className="w-4 h-4"/> Leave balance
+                </button>
+                <button 
+                  onClick={() => setActiveTab('timesheet')}
+                  className={`px-4 py-2 text-sm font-medium rounded-md transition-all flex items-center gap-2 ${activeTab === 'timesheet' ? 'bg-white text-gray-900 border border-gray-200 shadow-sm' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-100/50'}`}
+                >
+                    <Table className="w-4 h-4"/> Timesheet
                 </button>
             </div>
 
@@ -687,6 +988,313 @@ export const EmployeeRecordsReport: React.FC<{ onBack: () => void }> = ({ onBack
                     </div>
                 </div>
             )}
+
+            {activeTab === 'timesheet' && twelveMonthsData && (
+              <div className="border border-gray-200 rounded-lg overflow-hidden bg-white shadow-sm flex flex-col animate-in fade-in">
+                
+                <style>{`
+                  @media print {
+                    /* Hide standard layout panels, headers, selectors and other non-print elements */
+                    aside,
+                    nav,
+                    header,
+                    footer,
+                    [data-sonner-toaster],
+                    .print\:hidden,
+                    button,
+                    select {
+                      display: none !important;
+                    }
+                    
+                    /* Hide internal dashboard panels in report view */
+                    .w-60.shrink-0, /* Employee sidebar */
+                    .flex.gap-2.bg-gray-50, /* Tabs */
+                    .flex.items-center.justify-between { /* Dropdown row */
+                      display: none !important;
+                    }
+                    
+                    /* Reset all outer parent containers to not force height, overflow or layout constraints */
+                    html, body, #root, #root > div, main,
+                    .max-w-7xl,
+                    .bg-white.rounded-lg.border,
+                    .flex.flex-row.h-full,
+                    .flex-1.p-6.md\:p-8 {
+                      position: static !important;
+                      display: block !important;
+                      width: 100% !important;
+                      height: auto !important;
+                      min-height: 0 !important;
+                      max-height: none !important;
+                      margin: 0 !important;
+                      padding: 0 !important;
+                      border: none !important;
+                      box-shadow: none !important;
+                      background: transparent !important;
+                      overflow: visible !important;
+                    }
+                    
+                    /* Set page-wide visibility fallback to hide remaining screen content */
+                    body * {
+                      visibility: hidden;
+                    }
+                    
+                    /* Force the print area container and all its descendent elements to be visible */
+                    #timesheet-print-area-root,
+                    #timesheet-print-area-root * {
+                      visibility: visible !important;
+                    }
+                    
+                    /* Clean rendering layout container for print */
+                    #timesheet-print-area-root {
+                      display: block !important;
+                      width: 100% !important;
+                      background: white !important;
+                      padding: 0 !important;
+                      margin: 0 !important;
+                      overflow: visible !important;
+                    }
+                    
+                    /* Preserve centered flexbox and gap for employee details in print */
+                    #timesheet-print-area-root .flex {
+                      display: flex !important;
+                      justify-content: center !important;
+                      gap: 3rem !important;
+                    }
+                    
+                    @page {
+                      size: A4 landscape;
+                      margin: 6mm 6mm;
+                    }
+                    
+                    /* Force background colors to print */
+                    * {
+                      -webkit-print-color-adjust: exact !important;
+                      print-color-adjust: exact !important;
+                    }
+                    
+                    tr {
+                      page-break-inside: avoid;
+                    }
+                    
+                    .overflow-x-auto {
+                      overflow: visible !important;
+                    }
+                    
+                    table {
+                      width: 100% !important;
+                      table-layout: fixed !important;
+                      font-size: 7.5pt !important;
+                      border-collapse: collapse !important;
+                    }
+                    
+                    th, td {
+                      padding: 4px 2.5px !important;
+                      height: auto !important;
+                    }
+                    
+                    /* print fix for sticky headers/columns */
+                    td.sticky, th.sticky {
+                      background-color: inherit !important;
+                      position: static !important;
+                    }
+                  }
+                `}</style>
+
+                <div className="p-4 bg-gray-50 border-b border-gray-200 flex justify-between items-center print:hidden">
+                  <div className="flex items-center gap-3">
+                    <div className="text-sm font-medium text-gray-700 flex items-center gap-1.5">
+                      <Table className="w-4 h-4 text-purple-700"/> 12 Months Timesheet Grid &mdash; {selectedYear}
+                    </div>
+                    <button 
+                      onClick={handleDownloadPdf}
+                      disabled={isDownloading}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white hover:bg-gray-100 border border-gray-200 transition-colors shadow-sm text-gray-600 cursor-pointer active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                      title="Download PDF"
+                    >
+                      {isDownloading ? <Loader2 className="w-3.5 h-3.5 text-purple-700 animate-spin" /> : <Download className="w-3.5 h-3.5 text-purple-700" />}
+                      <span>{isDownloading ? 'Generating PDF...' : 'Download PDF'}</span>
+                    </button>
+                  </div>
+                  <span className="text-[10px] text-gray-500 font-medium">L = Leave Days · A = Present Days · D = Working Days · Lates = Total Lates · Bonus = Eligible</span>
+                </div>
+
+                <div id="timesheet-print-area-root" className="w-full">
+                  {/* Print-only Header (Visible in prints only) */}
+                  <div className="hidden print:block mb-6" style={{ fontFamily: "'Times New Roman', Times, serif" }}>
+                    <div className="text-center space-y-1 mb-4">
+                      <h2 className="text-2xl font-bold text-black" style={{ fontFamily: 'Georgia, serif' }}>
+                        Tokyo Consulting Firm Limited
+                      </h2>
+                      <h3 className="text-lg font-bold text-black">
+                        12 Months Timesheet Report &mdash; {selectedYear}
+                      </h3>
+                    </div>
+                    
+                    <div className="border border-black p-3 bg-gray-50/50 rounded-lg flex justify-center gap-12 text-xs font-bold text-black mb-4 mx-auto w-fit px-12">
+                      <div>Employee Name: <span className="font-medium">{selectedEmp.name}</span></div>
+                      <div>Employee ID: <span className="font-medium">{selectedEmp.eid}</span></div>
+                    </div>
+                  </div>
+
+                  <div className="overflow-x-auto w-full">
+                  <table className="w-full border-collapse text-left select-none text-[11px]" style={{ minWidth: '1200px', tableLayout: 'fixed' }}>
+                    <colgroup>
+                      <col style={{ width: '90px' }} />
+                      {Array.from({ length: 31 }).map((_, i) => (
+                        <col key={i} style={{ width: 'calc((100% - 90px - 180px) / 31)' }} />
+                      ))}
+                      <col style={{ width: '32px' }} />
+                      <col style={{ width: '32px' }} />
+                      <col style={{ width: '32px' }} />
+                      <col style={{ width: '48px' }} />
+                      <col style={{ width: '40px' }} />
+                    </colgroup>
+                    
+                    <thead>
+                      <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
+                        <th className="sticky left-0 z-20 pl-4 py-2.5 font-bold text-gray-500 uppercase tracking-wider bg-[#f8fafc] border-r border-gray-200">
+                          Month
+                        </th>
+                        {Array.from({ length: 31 }, (_, i) => i + 1).map(day => (
+                          <th key={day} className="py-2 text-center font-bold text-gray-700 border-r border-gray-100">
+                            {day}
+                          </th>
+                        ))}
+                        {([
+                          { key: 'L', label: 'L', title: 'Leave Days' },
+                          { key: 'A', label: 'A', title: 'Present Days' },
+                          { key: 'D', label: 'D', title: 'Working Days' },
+                          { key: 'Lates', label: 'Lates', title: 'Late Minutes' },
+                          { key: 'Bonus', label: 'Bonus', title: 'Bonus Eligibility (Zero Leaves & Lates)' },
+                        ]).map(col => (
+                          <th 
+                            key={col.key} 
+                            title={col.title}
+                            className={`py-2 text-center font-bold border-l border-gray-200 cursor-help ${
+                              col.key === 'L' ? 'text-purple-600 border-l-2' :
+                              col.key === 'A' ? 'text-red-500' :
+                              col.key === 'D' ? 'text-green-600' :
+                              col.key === 'Bonus' ? 'text-amber-500' : 'text-gray-500'
+                            }`}
+                          >
+                            {col.label}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    
+                    <tbody>
+                      {twelveMonthsData.map((monthData, idx) => {
+                        const rowBg = idx % 2 === 0 ? '#ffffff' : '#fafafa';
+                        
+                        return (
+                          <tr key={monthData.monthIdx} className="hover:bg-purple-50/20" style={{ borderBottom: '1px solid #f1f5f9' }}>
+                            <td className="sticky left-0 z-10 pl-4 py-3 font-semibold text-gray-900 bg-white border-r border-gray-200" style={{ background: rowBg }}>
+                              {monthData.monthName}
+                            </td>
+                            
+                            {Array.from({ length: 31 }, (_, i) => i + 1).map(day => {
+                              const dayStatus = monthData.dayStatuses[day];
+                              
+                              if (day > monthData.totalDays) {
+                                return (
+                                  <td key={day} className="border-r border-gray-100 bg-gray-100/50" style={{ height: '48px' }} />
+                                );
+                              }
+                              
+                              let cellBg = rowBg;
+                              let cellText = '—';
+                              let textColor = '#94a3b8';
+                              let cellTitle = `Day ${day} ${monthData.monthName}`;
+                              
+                              if (dayStatus) {
+                                if (dayStatus.isWeekend || dayStatus.isHoliday) {
+                                  cellBg = '#f0f9ff';
+                                  textColor = '#60a5fa';
+                                  cellText = dayStatus.isHoliday ? 'H' : '—';
+                                  cellTitle = dayStatus.isHoliday ? `Holiday: ${dayStatus.holidayReason || 'Public Holiday'}` : 'Weekend / Day Off';
+                                }
+                                
+                                if (dayStatus.isLeave) {
+                                  cellBg = '#fdf2f8';
+                                  textColor = '#db2777';
+                                  cellText = dayStatus.leaveCode || 'L';
+                                  cellTitle = `Leave: ${dayStatus.leaveType} (${dayStatus.leaveDays} day(s))`;
+                                }
+                                
+                                if (dayStatus.inTime || dayStatus.outTime) {
+                                  cellText = '';
+                                  cellTitle = `In: ${dayStatus.inTime || '—'} | Out: ${dayStatus.outTime || '—'}`;
+                                  if (dayStatus.late && dayStatus.late > 0) {
+                                    cellBg = '#fff5f5';
+                                    cellTitle += ` | Late: ${dayStatus.late} min`;
+                                  } else {
+                                    cellBg = '#f0fdf4';
+                                  }
+                                }
+                              }
+                              
+                              return (
+                                <td 
+                                  key={day}
+                                  title={cellTitle}
+                                  className="border-r border-gray-100 text-center font-mono text-[9px]"
+                                  style={{ background: cellBg, height: '48px', padding: '2px 1px' }}
+                                >
+                                  {dayStatus && (dayStatus.inTime || dayStatus.outTime) ? (
+                                    <div className="flex flex-col items-center justify-center gap-0.5 w-full h-full font-semibold">
+                                      {dayStatus.inTime && <span className="text-[#0f766e] scale-[0.95] leading-none">{dayStatus.inTime}</span>}
+                                      {dayStatus.outTime && <span className="text-[#374151] scale-[0.95] leading-none">{dayStatus.outTime}</span>}
+                                      {dayStatus.late && dayStatus.late > 0 ? (
+                                        <span className="text-red-500 font-bold text-[8px] leading-none">{dayStatus.late}m</span>
+                                      ) : null}
+                                    </div>
+                                  ) : (
+                                    <span className="font-bold text-[10px]" style={{ color: textColor }}>{cellText}</span>
+                                  )}
+                                </td>
+                              );
+                            })}
+                            
+                            {/* Summary Columns */}
+                            {monthData.hasData ? (
+                              <>
+                                <td className="py-2 text-center font-semibold text-purple-700 bg-gray-50/30 border-l-2 border-gray-200">
+                                  {monthData.leaveDaysCount > 0 ? monthData.leaveDaysCount : '—'}
+                                </td>
+                                <td className="py-2 text-center font-semibold text-red-600 bg-gray-50/30 border-l border-gray-200">
+                                  {monthData.presentDays > 0 ? monthData.presentDays : '—'}
+                                </td>
+                                <td className="py-2 text-center font-semibold text-green-600 bg-gray-50/30 border-l border-gray-200">
+                                  {monthData.workingDays > 0 ? monthData.workingDays : '—'}
+                                </td>
+                                <td className="py-2 text-center font-semibold text-gray-700 bg-gray-50/30 border-l border-gray-200 font-mono">
+                                  {monthData.totalLates > 0 ? `${monthData.totalLates}m` : '—'}
+                                </td>
+                                <td className={`py-2 text-center font-bold border-l border-gray-200 ${
+                                  monthData.bonusEligible ? 'text-emerald-700 bg-emerald-50/60' : 'text-rose-700 bg-rose-50/60'
+                                }`}>
+                                  {monthData.bonusEligible ? 'Yes' : 'No'}
+                                </td>
+                              </>
+                            ) : (
+                              <>
+                                <td className="py-2 text-center text-gray-300 bg-gray-50/30 border-l-2 border-gray-200 font-light">—</td>
+                                <td className="py-2 text-center text-gray-300 bg-gray-50/30 border-l border-gray-200 font-light">—</td>
+                                <td className="py-2 text-center text-gray-300 bg-gray-50/30 border-l border-gray-200 font-light">—</td>
+                                <td className="py-2 text-center text-gray-300 bg-gray-50/30 border-l border-gray-200 font-light">—</td>
+                                <td className="py-2 text-center text-gray-300 bg-gray-50/30 border-l border-gray-200 font-light">—</td>
+                              </>
+                            )}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

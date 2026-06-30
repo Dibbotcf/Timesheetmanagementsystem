@@ -53,12 +53,19 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  optimizeDeps: {
+    esbuildOptions: {
+      define: {
+        'process.env.NODE_ENV': '"development"'
+      }
+    }
+  },
   build: {
     target: 'esnext',
     outDir: 'dist',
   },
   server: {
-    port: 3000,
+    port: 3002,
     open: true,
   },
 });

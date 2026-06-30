@@ -227,10 +227,10 @@ export const Dashboard: React.FC = () => {
   }, [folders, isAdmin]);
 
   React.useEffect(() => {
-    if (!isAdmin && selectedFolderId === null && visibleFolders.length > 0) {
+    if (selectedFolderId === null && visibleFolders.length > 0) {
       setSelectedFolderId(visibleFolders[0].id);
     }
-  }, [isAdmin, selectedFolderId, visibleFolders]);
+  }, [selectedFolderId, visibleFolders]);
 
   const selectedFolder = folders.find(f => f.id === selectedFolderId);
 

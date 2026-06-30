@@ -1,5 +1,8 @@
-import React from 'react';
-import { Download, FileText, FileCheck, ShieldAlert, BookOpen, UserCheck, CheckSquare, FileSignature, Landmark, HeartHandshake, Briefcase } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { Download, FileText, FileCheck, ShieldAlert, BookOpen, UserCheck, CheckSquare, FileSignature, Landmark, HeartHandshake, Briefcase, Upload, Loader2 } from 'lucide-react';
+import { useAppStore } from '../App';
+import { API_BASE_URL } from '../utils/api';
+import { toast } from 'sonner';
 
 const policies = [
   { id: 1, title: 'Company Policy', filename: 'Company Policy 2026.pdf', icon: Landmark, color: '#3b82f6', colorEnd: '#4f46e5', badge: 'Core' },
@@ -15,8 +18,81 @@ const policies = [
 ];
 
 export const Policy: React.FC = () => {
+  const { currentUser } = useAppStore();
+  const isAdmin = currentUser?.role === 'Admin/HR';
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [selectedPolicyId, setSelectedPolicyId] = useState<number | null>(null);
+  const [uploadingId, setUploadingId] = useState<number | null>(null);
+  const [fileVersions, setFileVersions] = useState<Record<number, number>>({});
+
+  const triggerFileInput = (policyId: number) => {
+    setSelectedPolicyId(policyId);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+      fileInputRef.current.click();
+    }
+  };
+
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file || selectedPolicyId === null) return;
+
+    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+      toast.error('Only PDF files are allowed');
+      return;
+    }
+
+    const policy = policies.find(p => p.id === selectedPolicyId);
+    if (!policy) return;
+
+    setUploadingId(selectedPolicyId);
+    const toastId = toast.loading(`Uploading replacement for ${policy.title}...`);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const token = localStorage.getItem('tcf_token') || '';
+      const response = await fetch(`${API_BASE_URL}/upload-pdf?filename=${encodeURIComponent(policy.filename)}`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        },
+        body: formData
+      });
+
+      const result = await response.json();
+
+      if (response.ok && result.success) {
+        setFileVersions(prev => ({
+          ...prev,
+          [policy.id]: Date.now()
+        }));
+        toast.success(`Successfully replaced PDF for ${policy.title}`, { id: toastId });
+      } else {
+        toast.error(result.error || 'Failed to upload PDF', { id: toastId });
+      }
+    } catch (error) {
+      console.error(error);
+      toast.error('An error occurred during file upload', { id: toastId });
+    } finally {
+      setUploadingId(null);
+      setSelectedPolicyId(null);
+    }
+  };
+
   return (
     <div className="flex flex-col h-full bg-slate-50 overflow-y-auto" style={{ backgroundColor: '#f8fafc' }}>
+      {/* Hidden File Input */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handleFileChange}
+        accept=".pdf"
+        className="hidden"
+      />
+
       {/* Header */}
       <div className="relative shrink-0 overflow-hidden px-8 py-10 shadow-md" style={{ backgroundColor: '#1a237e' }}>
         <div className="absolute inset-0 opacity-10 pointer-events-none" style={{ backgroundImage: 'radial-gradient(circle at top right, #ffffff, transparent)' }} />
@@ -35,6 +111,9 @@ export const Policy: React.FC = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           {policies.map((policy) => {
             const Icon = policy.icon;
+            const currentVersion = fileVersions[policy.id] || 0;
+            const downloadUrl = `/Download TCF items/${policy.filename}${currentVersion ? `?v=${currentVersion}` : ''}`;
+            
             return (
               <div 
                 key={policy.id} 
@@ -60,12 +139,29 @@ export const Policy: React.FC = () => {
                       >
                         <Icon style={{ width: '24px', height: '24px' }} className="drop-shadow-sm" />
                       </div>
-                      <span 
-                        className="inline-flex items-center uppercase tracking-wider bg-slate-100 border border-slate-200" 
-                        style={{ padding: '4px 10px', borderRadius: '9999px', fontSize: '10px', fontWeight: 700, color: '#475569' }}
-                      >
-                         {policy.badge}
-                      </span>
+                      
+                      <div className="flex items-center gap-2">
+                        {isAdmin && (
+                          <button
+                            onClick={() => triggerFileInput(policy.id)}
+                            disabled={uploadingId === policy.id}
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 hover:border-indigo-200 transition-all shadow-sm bg-white border border-slate-200 flex items-center justify-center cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                            title="Replace PDF"
+                          >
+                            {uploadingId === policy.id ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-600" />
+                            ) : (
+                              <Upload className="w-3.5 h-3.5 text-indigo-600" />
+                            )}
+                          </button>
+                        )}
+                        <span 
+                          className="inline-flex items-center uppercase tracking-wider bg-slate-100 border border-slate-200" 
+                          style={{ padding: '4px 10px', borderRadius: '9999px', fontSize: '10px', fontWeight: 700, color: '#475569' }}
+                        >
+                           {policy.badge}
+                        </span>
+                      </div>
                    </div>
                    
                    <h3 className="font-bold text-lg leading-tight mb-2 transition-colors relative z-10" style={{ color: '#1e293b' }}>
@@ -78,7 +174,7 @@ export const Policy: React.FC = () => {
 
                 <div className="p-4 mt-auto relative z-10" style={{ backgroundColor: 'rgba(248, 250, 252, 0.8)', borderTop: '1px solid #f1f5f9' }}>
                   <a 
-                    href={`/Download TCF items/${policy.filename}`}
+                    href={downloadUrl}
                     download={policy.filename}
                     target="_blank"
                     rel="noopener noreferrer"

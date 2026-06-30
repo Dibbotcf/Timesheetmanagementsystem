@@ -5,7 +5,7 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import {
-  Printer, Save, CheckCircle2, XCircle, ClipboardList,
+  Save, CheckCircle2, XCircle, ClipboardList,
   Search, Users, AlertCircle, ChevronDown, Clock
 } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
@@ -287,7 +287,6 @@ export const Timesheet: React.FC = () => {
   const selectedEmployee = employees.find(e => e.id === primaryEmployeeId);
   const template = getTemplate(selectedYear, selectedMonth);
 
-  const handlePrint = () => window.print();
 
   const handleGenerate = () => {
     if (selectedEmployeeIds.length === 0) { toast.error('Please select at least one employee'); return; }
@@ -354,18 +353,7 @@ export const Timesheet: React.FC = () => {
   return (
     <div className="flex flex-col h-full">
 
-      {/* ── Full-width Page Header ── */}
-      <div className="flex items-center justify-between mb-4 print:hidden shrink-0">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Create Timesheet</h1>
-          <p className="text-sm text-slate-500 mt-0.5">
-            Generate a timesheet for {MONTHS[selectedMonth]} {selectedYear}
-          </p>
-        </div>
-        <Button onClick={handlePrint} variant="outline" size="sm" className="gap-2 shrink-0 print:hidden">
-          <Printer className="h-4 w-4" /> Print Preview
-        </Button>
-      </div>
+
 
       {/* ── Two-Column Body (Fixed 70/30 Split) ── */}
       <div className="flex gap-4 flex-1 min-h-0 pb-20">

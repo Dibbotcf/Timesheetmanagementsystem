@@ -122,6 +122,7 @@ Features:
 - [ ] Fill the **"Late"** column in OT Summary with actual late-coming data
 - [ ] Allow clicking an employee in the status panel to jump to their timesheet
 - [ ] Add the status panel to the **Dashboard** as a widget
+- [ ] **Fix PDF Generation Issue:** The 12 Months Timesheet "Download PDF" function currently returns a blank/white PDF. The issue stems from the switch from `html2canvas` (which crashed on Tailwind's `oklab` colors) to `html-to-image` (which is failing to render the manipulated DOM elements correctly, potentially due to delayed layout calculation or complex SVG cloning of the expanded scrolling table). We need to either resolve the `html-to-image` rendering failure, revert to `window.print()` (which the user disliked), or find an alternative PDF generation approach tomorrow.
 - [ ] Any other improvements or bug fixes as needed
 
 ---

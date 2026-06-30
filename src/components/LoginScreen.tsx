@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Lock, KeyRound, Eye, EyeOff } from 'lucide-react';
+import { Lock, KeyRound, Eye, EyeOff, BookmarkCheck, BookmarkX } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from './ui/dialog';
 import { Input } from './ui/input';
 import { Button } from './ui/button';
 import { Label } from './ui/label';
 import { toast } from 'sonner@2.0.3';
 import { Employee } from '../App';
+
+const SAVED_PASSKEY_KEY = 'tcf_saved_passkey';
 
 interface LoginScreenProps {
   employees: Employee[];
@@ -18,6 +20,29 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ employees, onLogin }) 
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
+  const [hasSavedPasskey, setHasSavedPasskey] = useState(false);
+
+  // On mount, check if there's a saved passkey
+  useEffect(() => {
+    const saved = localStorage.getItem(SAVED_PASSKEY_KEY);
+    setHasSavedPasskey(!!saved);
+  }, []);
+
+  // When modal opens, pre-fill saved passkey if it exists
+  useEffect(() => {
+    if (showLoginModal) {
+      const saved = localStorage.getItem(SAVED_PASSKEY_KEY);
+      if (saved) {
+        setPassword(saved);
+        setRememberMe(true);
+        setHasSavedPasskey(true);
+      } else {
+        setPassword('');
+        setRememberMe(false);
+      }
+    }
+  }, [showLoginModal]);
 
   const handleLockClick = () => {
     const newCount = lockClicks + 1;
@@ -29,12 +54,12 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ employees, onLogin }) 
     }
   };
 
-  const getTodayDateString = () => {
-    const d = new Date();
-    const day = d.getDate().toString().padStart(2, '0');
-    const month = (d.getMonth() + 1).toString().padStart(2, '0');
-    const year = d.getFullYear();
-    return `${day}/${month}/${year}`;
+  const handleForgetPasskey = () => {
+    localStorage.removeItem(SAVED_PASSKEY_KEY);
+    setHasSavedPasskey(false);
+    setRememberMe(false);
+    setPassword('');
+    toast.success('Saved passkey cleared');
   };
 
   const handleLogin = async (e?: React.FormEvent) => {
@@ -50,7 +75,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ employees, onLogin }) 
       }
 
       // Call Backend API
-      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api'; // Direct usage for now to avoid extensive refactors
+      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
       const res = await fetch(`${API_URL}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -60,8 +85,15 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ employees, onLogin }) 
       const data = await res.json();
 
       if (res.ok && data.success) {
+        // Save or clear passkey based on remember-me
+        if (rememberMe) {
+          localStorage.setItem(SAVED_PASSKEY_KEY, password);
+          setHasSavedPasskey(true);
+        } else {
+          localStorage.removeItem(SAVED_PASSKEY_KEY);
+          setHasSavedPasskey(false);
+        }
         toast.success(`Welcome back, ${data.user.name}`);
-        // Save token
         localStorage.setItem('tcf_token', data.token);
         onLogin(data.user);
       } else {
@@ -89,7 +121,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ employees, onLogin }) 
         </button>
 
         <div className="text-gray-400 text-sm font-mono">
-          {/* Hint not visible, strictly purely obscure UX as requested */}
           System Locked
         </div>
       </div>
@@ -97,7 +128,23 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ employees, onLogin }) 
       <Dialog open={showLoginModal} onOpenChange={setShowLoginModal}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>System Access</DialogTitle>
+            <DialogTitle className="flex items-center gap-2">
+              System Access
+              {hasSavedPasskey && (
+                <span
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: '4px',
+                    background: '#dcfce7', color: '#16a34a',
+                    border: '1px solid #bbf7d0', borderRadius: '9999px',
+                    fontSize: '10px', fontWeight: 700,
+                    padding: '1px 8px', lineHeight: '18px'
+                  }}
+                >
+                  <BookmarkCheck style={{ width: '11px', height: '11px' }} />
+                  Passkey Saved
+                </span>
+              )}
+            </DialogTitle>
             <DialogDescription>
               Enter your daily secure passkey to continue.
             </DialogDescription>
@@ -115,7 +162,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ employees, onLogin }) 
                   placeholder="Format: Name@Key"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  autoFocus
+                  autoComplete="current-password"
+                  autoFocus={!hasSavedPasskey}
                 />
                 <button
                   type="button"
@@ -130,6 +178,42 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ employees, onLogin }) 
                 </button>
               </div>
             </div>
+
+            {/* Remember Me row */}
+            <div className="flex items-center justify-between">
+              <label
+                htmlFor="remember-me"
+                className="flex items-center gap-2 cursor-pointer select-none"
+                style={{ fontSize: '13px', color: '#374151' }}
+              >
+                <input
+                  id="remember-me"
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={e => setRememberMe(e.target.checked)}
+                  style={{
+                    width: '15px', height: '15px',
+                    accentColor: '#1d4ed8', cursor: 'pointer'
+                  }}
+                />
+                <BookmarkCheck style={{ width: '14px', height: '14px', color: rememberMe ? '#1d4ed8' : '#9ca3af' }} />
+                Remember this passkey
+              </label>
+
+              {hasSavedPasskey && (
+                <button
+                  type="button"
+                  onClick={handleForgetPasskey}
+                  className="flex items-center gap-1 text-red-500 hover:text-red-700 transition-colors"
+                  style={{ fontSize: '11px', fontWeight: 600 }}
+                  title="Remove saved passkey"
+                >
+                  <BookmarkX style={{ width: '13px', height: '13px' }} />
+                  Forget
+                </button>
+              )}
+            </div>
+
             <DialogFooter>
               <Button type="submit" className="w-full bg-blue-900 hover:bg-blue-800" disabled={loading}>
                 {loading ? 'Verifying...' : 'Unlock System'}

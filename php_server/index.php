@@ -326,6 +326,97 @@ if ($parts[0] === 'restore' && $method === 'POST') {
     exit;
 }
 
+if ($parts[0] === 'upload-pdf' && $method === 'POST') {
+    // 1. Get auth header and verify admin status
+    $authHeader = '';
+    if (isset($_SERVER['HTTP_AUTHORIZATION'])) {
+        $authHeader = $_SERVER['HTTP_AUTHORIZATION'];
+    } elseif (isset($_SERVER['REDIRECT_HTTP_AUTHORIZATION'])) {
+        $authHeader = $_SERVER['REDIRECT_HTTP_AUTHORIZATION'];
+    } else {
+        $headers = function_exists('getallheaders') ? getallheaders() : [];
+        if (isset($headers['Authorization'])) {
+            $authHeader = $headers['Authorization'];
+        }
+    }
+
+    $isAdmin = false;
+    if (strpos($authHeader, 'Bearer ') === 0) {
+        $token = substr($authHeader, 7);
+        $decoded = json_decode(base64_decode($token), true);
+        if ($decoded && isset($decoded['role']) && $decoded['role'] === 'Admin/HR') {
+            $isAdmin = true;
+        }
+    }
+
+    if (!$isAdmin) {
+        http_response_code(403);
+        echo json_encode(['error' => 'Forbidden']);
+        exit;
+    }
+
+    // 2. Validate target filename
+    $targetFilename = $_GET['filename'] ?? '';
+    $allowed_filenames = [
+      'Company Policy 2026.pdf',
+      '27 Doctrines.pdf',
+      '10 Code of Capable Person.pdf',
+      'Corporate Etiquette.pdf',
+      'Leave Process Notice.pdf',
+      'Rules for Prevention from Sexual and Power Harassment in Workplace.pdf',
+      'Leave Rules for What\'s app use.pdf',
+      'TCF - Leave Application Fillable  DEC 2025.pdf',
+      'TCF Bangladesh Profile.pdf',
+      'TCF Letterhead new.pdf'
+    ];
+
+    if (!$targetFilename || !in_array($targetFilename, $allowed_filenames)) {
+        http_response_code(400);
+        echo json_encode(['error' => 'Invalid or disallowed filename']);
+        exit;
+    }
+
+    // 3. Process the uploaded file
+    if (!isset($_FILES['file'])) {
+        http_response_code(400);
+        echo json_encode(['error' => 'No file uploaded']);
+        exit;
+    }
+
+    $file = $_FILES['file'];
+    if ($file['error'] !== UPLOAD_ERR_OK) {
+        http_response_code(400);
+        echo json_encode(['error' => 'File upload error code: ' . $file['error']]);
+        exit;
+    }
+
+    // Ensure it's a PDF
+    $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+    if ($ext !== 'pdf') {
+        http_response_code(400);
+        echo json_encode(['error' => 'Only PDF files are allowed']);
+        exit;
+    }
+
+    // Target directory: ../Download TCF items/
+    $targetDir = __DIR__ . '/../Download TCF items/';
+    
+    // Ensure the folder exists
+    if (!is_dir($targetDir)) {
+        mkdir($targetDir, 0755, true);
+    }
+
+    $targetPath = $targetDir . $targetFilename;
+
+    if (move_uploaded_file($file['tmp_name'], $targetPath)) {
+        echo json_encode(['success' => true, 'filename' => $targetFilename]);
+    } else {
+        http_response_code(500);
+        echo json_encode(['error' => 'Failed to save uploaded file']);
+    }
+    exit;
+}
+
 http_response_code(404);
 echo json_encode(['error' => 'Endpoint not found']);
 ?>

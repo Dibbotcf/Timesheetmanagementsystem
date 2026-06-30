@@ -1,5 +1,6 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { jsPDF } from 'jspdf';
 import { useAppStore, OTRecord, Employee, ReportFolder, SavedReport } from '../App';
 import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -69,6 +70,126 @@ const RecordsView = () => {
     const [isCreateFolderOpen, setIsCreateFolderOpen] = useState(false);
     const [newFolderName, setNewFolderName] = useState('');
     const [viewReport, setViewReport] = useState<SavedReport | null>(null);
+    const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
+
+    const handleDownloadPDF = async () => {
+        if (!viewReport) return;
+        setIsGeneratingPDF(true);
+        try {
+            const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+            const M = 12; // margin
+            const PW = 210;
+            const CW = PW - M * 2; // 186mm content width
+            let y = M;
+
+            // ── Header box ──
+            pdf.setFillColor(217, 234, 211);
+            pdf.setDrawColor(0); pdf.setLineWidth(0.3);
+            pdf.rect(M, y, CW, 22, 'FD');
+            pdf.setFont('helvetica', 'bold');
+            pdf.setFontSize(12); pdf.setTextColor(0);
+            pdf.text('TOKYO CONSULTING FIRM LIMITED', PW / 2, y + 7, { align: 'center' });
+            pdf.setFontSize(10);
+            pdf.text('OT Summary', PW / 2, y + 13, { align: 'center' });
+            pdf.setFontSize(9);
+            pdf.text(`For the month of ${format(parseISO(`${viewReport.month}-01`), 'MMMM-yyyy')}`, PW / 2, y + 19, { align: 'center' });
+            y += 26;
+
+            // ── Column definitions ──
+            const cols = [
+                { label: 'SL. NO.',            w: 14,  align: 'center' as const },
+                { label: 'Employees Name',      w: 80,  align: 'left'   as const },
+                { label: 'OT Hour(s)',          w: 30,  align: 'center' as const },
+                { label: 'Prev. Month End OT',  w: 38,  align: 'center' as const },
+                { label: 'Total OT',            w: 24,  align: 'center' as const },
+            ];
+            const ROW_H = 6.5;
+            const HDR_H = 8;
+
+            const drawRow = (cells: string[], rowY: number, h: number, bold = false, fillColor?: [number,number,number]) => {
+                if (fillColor) { pdf.setFillColor(...fillColor); pdf.rect(M, rowY, CW, h, 'F'); }
+                pdf.rect(M, rowY, CW, h, 'S');
+                pdf.setFont('helvetica', bold ? 'bold' : 'normal');
+                let cx = M;
+                cells.forEach((val, i) => {
+                    if (i < cols.length - 1) pdf.line(cx + cols[i].w, rowY, cx + cols[i].w, rowY + h);
+                    if (val) {
+                        const tx = cols[i].align === 'center' ? cx + cols[i].w / 2 :
+                                   cols[i].align === 'right'  ? cx + cols[i].w - 1.5 : cx + 2;
+                        pdf.text(val, tx, rowY + h / 2 + 1.5, { align: cols[i].align });
+                    }
+                    cx += cols[i].w;
+                });
+            };
+
+            // ── Table header ──
+            pdf.setFontSize(8); pdf.setTextColor(0);
+            drawRow(cols.map(c => c.label), y, HDR_H, true, [191, 191, 191]);
+            y += HDR_H;
+
+            // ── Sort rows ──
+            const sortedRows = [...viewReport.data.reportData].sort((a: any, b: any) => {
+                const parseN = (eid: string) => { const m = eid.match(/\d+/); return m ? parseInt(m[0], 10) : Infinity; };
+                const eA = employees.find((e: any) => e.id === a.id)?.eid || '';
+                const eB = employees.find((e: any) => e.id === b.id)?.eid || '';
+                return parseN(eA) !== parseN(eB) ? parseN(eA) - parseN(eB) : eA.localeCompare(eB);
+            });
+
+            // ── Data rows ──
+            pdf.setFontSize(8);
+            sortedRows.forEach((row: any, idx: number) => {
+                drawRow([
+                    String(idx + 1),
+                    row.name,
+                    row.currentMonthOT > 0  ? row.currentMonthOT.toFixed(2)  : '',
+                    row.prevMonthEndOT > 0  ? row.prevMonthEndOT.toFixed(2)  : '',
+                    row.totalOT > 0         ? row.totalOT.toFixed(2)         : '-',
+                ], y, ROW_H);
+                y += ROW_H;
+            });
+
+            // ── Total row ──
+            pdf.setFont('helvetica', 'bold');
+            pdf.rect(M, y, CW, ROW_H + 1, 'S');
+            pdf.setLineWidth(0.5); pdf.line(M, y, M + CW, y); pdf.setLineWidth(0.3);
+            const totalColsStart = cols[0].w + cols[1].w;
+            pdf.line(M + totalColsStart, y, M + totalColsStart, y + ROW_H + 1);
+            pdf.text('TOTAL', M + totalColsStart / 2, y + (ROW_H + 1) / 2 + 1.5, { align: 'center' });
+            let tx = M + totalColsStart;
+            [[cols[2], viewReport.data.totals.current], [cols[3], viewReport.data.totals.prevEnd], [cols[4], viewReport.data.totals.total]].forEach(([col, val]: any, i, arr) => {
+                if (i < arr.length - 1) pdf.line(tx + col.w, y, tx + col.w, y + ROW_H + 1);
+                const v = val > 0 ? val.toFixed(2) : (i === 2 ? val.toFixed(2) : '');
+                if (v) pdf.text(v, tx + col.w / 2, y + (ROW_H + 1) / 2 + 1.5, { align: 'center' });
+                tx += col.w;
+            });
+            y += ROW_H + 1 + 18;
+
+            // ── Signatures ──
+            const savedSigs = viewReport.data.signatures || {};
+            const sigW = 52;
+            const sigSlots = [
+                { role: 'Prepared By',   sig: savedSigs.preparedBy,   x: M },
+                { role: 'Checked By',    sig: savedSigs.checkedBy,    x: PW / 2 - sigW / 2 },
+                { role: 'Authorized By', sig: savedSigs.authorizedBy, x: PW - M - sigW },
+            ];
+            for (const slot of sigSlots) {
+                if (slot.sig?.imageUrl) {
+                    try { pdf.addImage(slot.sig.imageUrl, 'PNG', slot.x, y, sigW, 13); } catch {}
+                }
+                pdf.setLineWidth(0.3); pdf.line(slot.x, y + 15, slot.x + sigW, y + 15);
+                pdf.setFont('helvetica', 'normal'); pdf.setFontSize(9);
+                pdf.text(slot.role, slot.x + sigW / 2, y + 20, { align: 'center' });
+            }
+
+            pdf.save(`OT-Summary-${viewReport.month}.pdf`);
+            toast.success('PDF downloaded');
+        } catch (e) {
+            console.error('PDF error:', e);
+            toast.error('PDF generation failed: ' + (e instanceof Error ? e.message : String(e)));
+        } finally {
+            setIsGeneratingPDF(false);
+        }
+    };
 
     const handleCreateFolder = async () => {
         if (!newFolderName) return;
@@ -95,26 +216,33 @@ const RecordsView = () => {
                         &larr; Back to Records
                     </Button>
                     <h2 className="text-xl font-bold">Report: {viewReport.name}</h2>
-                     <Button variant="outline" onClick={() => window.print()} className="ml-auto">
-                        <Printer className="mr-2 h-4 w-4" /> Print Saved Report
-                     </Button>
+                    <Button onClick={handleDownloadPDF} disabled={isGeneratingPDF} className="ml-auto bg-green-600 hover:bg-green-700 text-white">
+                        <Download className="mr-2 h-4 w-4" />
+                        {isGeneratingPDF ? 'Generating...' : 'Download PDF'}
+                    </Button>
                 </div>
-                {/* Reuse the visualization logic or a simplified version */}
-                 <div className="bg-white p-8 min-h-[800px] shadow-lg border border-gray-200 w-full max-w-[210mm] mx-auto print:shadow-none print:border-none print:p-0">
-                    <div className="text-center mb-6 bg-[#d9ead3] border border-black p-4">
-                        <h1 className="text-xl font-bold text-black uppercase">Tokyo Consulting Firm Limited</h1>
-                        <h2 className="text-lg font-bold text-black mt-1">OT Summary</h2>
-                        <h3 className="text-md font-bold text-black mt-1">For the month of {format(parseISO(`${viewReport.month}-01`), 'MMMM-yyyy')}</h3>
+                <div className="bg-white p-8 shadow-lg border border-gray-200 w-full max-w-[210mm] mx-auto">
+                    <div className="text-center mb-4 bg-[#d9ead3] border border-black p-3">
+                        <h1 className="text-lg font-bold text-black uppercase">Tokyo Consulting Firm Limited</h1>
+                        <h2 className="text-base font-bold text-black mt-1">OT Summary</h2>
+                        <h3 className="text-sm font-bold text-black mt-1">For the month of {format(parseISO(`${viewReport.month}-01`), 'MMMM-yyyy')}</h3>
                     </div>
                     <div className="border border-black">
-                         <table className="w-full text-sm">
+                         <table className="w-full text-xs table-fixed">
+                            <colgroup>
+                                <col style={{ width: '48px' }} />
+                                <col />
+                                <col style={{ width: '90px' }} />
+                                <col style={{ width: '120px' }} />
+                                <col style={{ width: '80px' }} />
+                            </colgroup>
                             <thead>
                                 <tr className="bg-[#bfbfbf] text-black divide-x divide-black border-b border-black">
-                                    <th className="p-2 w-16 text-center font-bold border-r border-black">SL. NO.</th>
-                                    <th className="p-2 text-left font-bold border-r border-black">Employees Name</th>
-                                    <th className="p-2 text-right font-bold border-r border-black">OT Hour(s)</th>
-                                    <th className="p-2 text-right font-bold border-r border-black">Prev. Month End OT</th>
-                                    <th className="p-2 text-right font-bold">Total OT</th>
+                                    <th className="p-1.5 text-center font-bold border-r border-black">SL. NO.</th>
+                                    <th className="p-1.5 text-center font-bold border-r border-black">Employees Name</th>
+                                    <th className="p-1.5 text-center font-bold border-r border-black">OT Hour(s)</th>
+                                    <th className="p-1.5 text-center font-bold border-r border-black">Prev. Month End OT</th>
+                                    <th className="p-1.5 text-center font-bold">Total OT</th>
                                 </tr>
                             </thead>
                              <tbody className="divide-y divide-black">
@@ -135,30 +263,27 @@ const RecordsView = () => {
                                     });
                                     return sortedRows.map((row: any, idx: number) => (
                                         <tr key={row.id} className="divide-x divide-black">
-                                            <td className="p-2 text-center border-r border-black">{idx + 1}</td>
-                                            <td className="p-2 text-left border-r border-black font-medium">{row.name}</td>
-                                            <td className="p-2 text-right border-r border-black">{row.currentMonthOT > 0 ? row.currentMonthOT.toFixed(2) : ''}</td>
-                                            <td className="p-2 text-right border-r border-black">{row.prevMonthEndOT > 0 ? row.prevMonthEndOT.toFixed(2) : ''}</td>
-                                            <td className="p-2 text-right font-bold">{row.totalOT > 0 ? row.totalOT.toFixed(2) : '-'}</td>
+                                            <td className="py-1 px-1.5 text-center border-r border-black">{idx + 1}</td>
+                                            <td className="py-1 px-1.5 text-left border-r border-black font-medium">{row.name}</td>
+                                            <td className="py-1 px-1.5 text-right border-r border-black">{row.currentMonthOT > 0 ? row.currentMonthOT.toFixed(2) : ''}</td>
+                                            <td className="py-1 px-1.5 text-right border-r border-black">{row.prevMonthEndOT > 0 ? row.prevMonthEndOT.toFixed(2) : ''}</td>
+                                            <td className="py-1 px-1.5 text-right font-bold">{row.totalOT > 0 ? row.totalOT.toFixed(2) : '-'}</td>
                                         </tr>
                                     ));
                                 })()}
                                 <tr className="font-bold text-black border-t-2 border-black divide-x divide-black bg-white">
-                                    <td colSpan={2} className="p-2 text-center uppercase border-r border-black">Total</td>
-                                    <td className="p-2 text-right border-r border-black">{viewReport.data.totals.current > 0 ? viewReport.data.totals.current.toFixed(2) : ''}</td>
-                                    <td className="p-2 text-right border-r border-black">{viewReport.data.totals.prevEnd > 0 ? viewReport.data.totals.prevEnd.toFixed(2) : ''}</td>
-                                    <td className="p-2 text-right text-lg">{viewReport.data.totals.total.toFixed(2)}</td>
+                                    <td colSpan={2} className="py-1.5 px-1.5 text-center uppercase border-r border-black">Total</td>
+                                    <td className="py-1.5 px-1.5 text-right border-r border-black">{viewReport.data.totals.current > 0 ? viewReport.data.totals.current.toFixed(2) : ''}</td>
+                                    <td className="py-1.5 px-1.5 text-right border-r border-black">{viewReport.data.totals.prevEnd > 0 ? viewReport.data.totals.prevEnd.toFixed(2) : ''}</td>
+                                    <td className="py-1.5 px-1.5 text-right text-sm font-bold">{viewReport.data.totals.total.toFixed(2)}</td>
                                 </tr>
                             </tbody>
                         </table>
                     </div>
-                    <div className="grid grid-cols-3 gap-8 mt-20 pt-8">
+                    <div className="grid grid-cols-3 gap-8 mt-8 pt-4">
                          <SignatureBlock role="Prepared By" signature={savedSigs.preparedBy} readOnly />
                          <SignatureBlock role="Checked By" signature={savedSigs.checkedBy} readOnly />
                          <SignatureBlock role="Authorized By" signature={savedSigs.authorizedBy} readOnly />
-                    </div>
-                    <div className="text-center mt-8 text-gray-400 text-xs print:hidden">
-                        Page 1
                     </div>
                 </div>
              </div>

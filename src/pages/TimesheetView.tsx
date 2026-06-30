@@ -170,8 +170,9 @@ export const TimesheetView: React.FC = () => {
     const MS = 24 * 60 * 60 * 1000;
     for (const leave of leaves) {
       if (leave.employeeId !== timesheet.employeeId || leave.status !== 'Approved') continue;
-      const startT = new Date(leave.startDate).getTime();
-      const endT   = new Date(leave.endDate).getTime();
+      const parseLocal = (s: string) => { const [y,m,d] = s.split('-').map(Number); return new Date(y, m-1, d).getTime(); };
+      const startT = parseLocal(leave.startDate);
+      const endT   = parseLocal(leave.endDate);
       for (let t = startT; t <= endT; t += MS) {
         const d = new Date(t);
         if (d.getFullYear() === timesheet.year && d.getMonth() === timesheet.month) {
@@ -242,8 +243,10 @@ export const TimesheetView: React.FC = () => {
     const MS = 24 * 60 * 60 * 1000;
     for (const leave of leaves) {
       if (leave.employeeId !== timesheet.employeeId || leave.status !== 'Approved') continue;
-      const leaveStart = new Date(leave.startDate).getTime();
-      const leaveEnd   = new Date(leave.endDate).getTime();
+      // Parse as local midnight to match monthStart/monthEnd (avoids UTC+offset skipping last-day leaves)
+      const parseLocal = (s: string) => { const [y,m,d] = s.split('-').map(Number); return new Date(y, m-1, d).getTime(); };
+      const leaveStart = parseLocal(leave.startDate);
+      const leaveEnd   = parseLocal(leave.endDate);
       if (leaveEnd < monthStart || leaveStart > monthEnd) continue;
       // Calculate overlap in days
       const overlapStart = Math.max(leaveStart, monthStart);

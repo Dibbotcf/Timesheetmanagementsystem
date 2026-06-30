@@ -19,6 +19,7 @@ const PORT = process.env.PORT || 3001;
 const fs = require('fs'); // Explicit require if needed
 const path = require('path');
 const archiver = require('archiver');
+const multer = require('multer');
 
 // Middleware
 app.use(cors());
@@ -371,6 +372,85 @@ app.post('/api/restore', async (req, res) => {
         connection.release();
     }
 });
+
+// --- PDF Replacement Upload ---
+const ALLOWED_FILENAMES = [
+  'Company Policy 2026.pdf',
+  '27 Doctrines.pdf',
+  '10 Code of Capable Person.pdf',
+  'Corporate Etiquette.pdf',
+  'Leave Process Notice.pdf',
+  'Rules for Prevention from Sexual and Power Harassment in Workplace.pdf',
+  'Leave Rules for What\'s app use.pdf',
+  'TCF - Leave Application Fillable  DEC 2025.pdf',
+  'TCF Bangladesh Profile.pdf',
+  'TCF Letterhead new.pdf'
+];
+
+const storage = multer.diskStorage({
+    destination: function (req, file, cb) {
+        cb(null, path.join(__dirname, '../public/Download TCF items'));
+    },
+    filename: function (req, file, cb) {
+        const targetFilename = req.query.filename;
+        if (!ALLOWED_FILENAMES.includes(targetFilename)) {
+            return cb(new Error('Invalid or disallowed filename'));
+        }
+        cb(null, targetFilename);
+    }
+});
+
+const upload = multer({
+    storage: storage,
+    fileFilter: function (req, file, cb) {
+        if (file.mimetype !== 'application/pdf' && !file.originalname.toLowerCase().endsWith('.pdf')) {
+            return cb(new Error('Only PDF files are allowed'));
+        }
+        cb(null, true);
+    },
+    limits: {
+        fileSize: 20 * 1024 * 1024 // 20 MB limit
+    }
+});
+
+app.post('/api/upload-pdf', (req, res, next) => {
+    // 1. Verify Admin/HR authorization
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ error: 'Unauthorized' });
+    }
+    const token = authHeader.substring(7);
+    try {
+        const decoded = JSON.parse(Buffer.from(token, 'base64').toString('utf-8'));
+        if (!decoded || decoded.role !== 'Admin/HR') {
+            return res.status(403).json({ error: 'Forbidden' });
+        }
+    } catch (e) {
+        return res.status(401).json({ error: 'Invalid token' });
+    }
+    
+    // 2. Validate filename query parameter
+    const targetFilename = req.query.filename;
+    if (!targetFilename || !ALLOWED_FILENAMES.includes(targetFilename)) {
+        return res.status(400).json({ error: 'Invalid or disallowed filename' });
+    }
+    
+    next();
+}, upload.single('file'), (req, res) => {
+    if (!req.file) {
+        return res.status(400).json({ error: 'No file uploaded or file rejected' });
+    }
+    res.json({ success: true, filename: req.file.filename });
+});
+
+// Specific error handler for upload-pdf route
+app.use('/api/upload-pdf', (err, req, res, next) => {
+    if (err) {
+        return res.status(400).json({ error: err.message });
+    }
+    next();
+});
+
 
 server.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);

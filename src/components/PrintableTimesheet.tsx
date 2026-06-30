@@ -256,15 +256,44 @@ export const PrintableTimesheet: React.FC<Props> = ({
         return null;
     }, [timesheet.year, timesheet.month, daysInMonth, template]);
 
-    // Build the auto-remark for row 09: list of OT dates (excluding last working day)
+    // Build the auto-remark for row 09: "3(1), 15(2)" format
     const otDatesRemark = useMemo((): string => {
-        const dates = Object.keys(otByDay)
-            .map(Number)
-            .filter(d => d !== lastWorkingDay && otByDay[d] > 0)
-            .sort((a, b) => a - b);
-        if (dates.length === 0) return '';
-        return dates.join(', ');
+        return Object.entries(otByDay)
+            .map(([dayStr, hours]) => ({ day: Number(dayStr), hours }))
+            .filter(e => e.day !== lastWorkingDay && e.hours > 0)
+            .sort((a, b) => a.day - b.day)
+            .map(e => `${e.day}(${fmtOT(e.hours)})`)
+            .join(', ');
     }, [otByDay, lastWorkingDay]);
+
+    // Build auto-remark for row 04: "3(15), 8(36)" format (minutes)
+    const lateDatesRemark = useMemo((): string => {
+        return Object.entries(attendanceLateByDay)
+            .map(([dayStr, mins]) => ({ day: Number(dayStr), mins }))
+            .filter(e => e.mins > 0)
+            .sort((a, b) => a.day - b.day)
+            .map(e => `${e.day}(${e.mins})`)
+            .join(', ');
+    }, [attendanceLateByDay]);
+
+    // Build auto-remarks for leave rows (01-05): "17(S>0.5), 30(S>1)" format
+    const leaveDateRemarks = useMemo(() => {
+        type Entry = { day: number; days: number };
+        const sick: Entry[] = [], casual: Entry[] = [], earn: Entry[] = [], other: Entry[] = [];
+        Object.entries(leavesByDay).forEach(([dayStr, leave]) => {
+            const day = Number(dayStr);
+            const days = leave.days ?? 1;
+            if (leave.type === 'Sick Leave') sick.push({ day, days });
+            else if (leave.type === 'Casual Leave') casual.push({ day, days });
+            else if (leave.type === 'Earn Leave') earn.push({ day, days });
+            else other.push({ day, days });
+        });
+        const fmt = (_abbrev: string, arr: Entry[]) =>
+            arr.sort((a, b) => a.day - b.day)
+               .map(e => `${e.day}(${e.days})`)
+               .join(', ');
+        return { sick: fmt('S', sick), casual: fmt('C', casual), earn: fmt('E', earn), other: fmt('O', other) };
+    }, [leavesByDay]);
 
     // Compute the display label for the previous month's last working day (for row 07 remarks)
     const prevMonthLastDayLabel = useMemo((): string => {
@@ -780,6 +809,16 @@ export const PrintableTimesheet: React.FC<Props> = ({
                                                  className={`${fontRegular} text-[11px] text-blue-700`}
                                                  align="left"
                                              />
+                                         ) : row.sl === '01' ? (
+                                             <InputCell isEditing={false} value={leaveDateRemarks.sick} onChange={() => {}} className={`${fontRegular} text-[11px] text-[#7b3f3f]`} align="left" />
+                                         ) : row.sl === '02' ? (
+                                             <InputCell isEditing={false} value={leaveDateRemarks.casual} onChange={() => {}} className={`${fontRegular} text-[11px] text-[#7b3f3f]`} align="left" />
+                                         ) : row.sl === '03' ? (
+                                             <InputCell isEditing={false} value={leaveDateRemarks.earn} onChange={() => {}} className={`${fontRegular} text-[11px] text-[#7b3f3f]`} align="left" />
+                                         ) : row.sl === '04' ? (
+                                             <InputCell isEditing={false} value={lateDatesRemark} onChange={() => {}} className={`${fontRegular} text-[11px] text-red-600`} align="left" />
+                                         ) : row.sl === '05' ? (
+                                             <InputCell isEditing={false} value={leaveDateRemarks.other} onChange={() => {}} className={`${fontRegular} text-[11px] text-[#7b3f3f]`} align="left" />
                                          ) : (
                                              <InputCell isEditing={isEditing} value={summaryItem.remarks} onChange={(v) => handleSummaryChange(row.sl, 'remarks', v)} className={`${fontRegular} text-[11px]`} align="left" />
                                          )}
