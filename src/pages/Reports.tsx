@@ -2,12 +2,13 @@ import React, { useState, useRef } from 'react';
 import { useAppStore, Employee, LeaveRecord } from '../App';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
-import { ArrowLeft, Download, Smartphone, Calendar, Clock, ClipboardList, HelpCircle } from 'lucide-react';
+import { ArrowLeft, Download, Smartphone, Calendar, Clock, ClipboardList, HelpCircle, Timer } from 'lucide-react';
 import { toast } from 'sonner';
 import { toPng } from 'html-to-image';
 import { jsPDF } from 'jspdf';
 import { SummaryReportView } from './OTManagement';
 import { EmployeeRecordsReport } from './EmployeeRecordsReport';
+import { LateDelayReport } from './LateDelayReport';
 
 export const Reports: React.FC = () => {
   const { employees, leaves, otRecords } = useAppStore();
@@ -220,23 +221,28 @@ export const Reports: React.FC = () => {
               </CardContent>
             </Card>
 
-            {/* Card 2: Leave Summary (Mock) */}
-            <Card className="opacity-60 border border-gray-200">
+            {/* Card 2: Late & Delay Report */}
+            <Card
+              className="hover:shadow-lg transition-all duration-300 border border-gray-200 cursor-pointer group hover:border-violet-300"
+              onClick={() => setActiveReport('late_report')}
+            >
               <CardHeader className="flex flex-row items-center space-y-0 gap-4 pb-4">
-                <div className="p-3 rounded-lg bg-gray-50 text-gray-500">
-                  <Calendar className="h-6 w-6" />
+                <div className="p-3 rounded-lg bg-violet-50 text-violet-700 group-hover:bg-violet-600 group-hover:text-white transition-colors">
+                  <Timer className="h-6 w-6" />
                 </div>
                 <div>
-                  <CardTitle className="text-lg font-bold text-gray-700">Leave Summary Report</CardTitle>
-                  <CardDescription className="text-xs mt-1">Balances, types & approvals</CardDescription>
+                  <CardTitle className="text-lg font-bold group-hover:text-violet-900">Late &amp; Delay Report</CardTitle>
+                  <CardDescription className="text-xs mt-1">Late days, minutes &amp; leave breakdown</CardDescription>
                 </div>
               </CardHeader>
               <CardContent>
-                <p className="text-sm text-gray-500">
-                  Overview of remaining leave balances, CASUAL/SICK types utilized, and employee status.
+                <p className="text-sm text-gray-600">
+                  Monthly late arrival summary per employee — late days, total delay minutes, late dates, and leave type breakdown.
                 </p>
-                <div className="mt-4 flex justify-between items-center">
-                  <span className="text-xs font-semibold bg-gray-100 text-gray-600 px-2.5 py-0.5 rounded-full">Coming Soon</span>
+                <div className="mt-4 flex justify-end items-center">
+                  <Button variant="ghost" className="text-violet-700 hover:text-violet-900 font-semibold text-xs group-hover:translate-x-1 transition-transform">
+                    Generate Report &rarr;
+                  </Button>
                 </div>
               </CardContent>
             </Card>
@@ -294,6 +300,8 @@ export const Reports: React.FC = () => {
             </Card>
           </div>
         </div>
+      ) : activeReport === 'late_report' ? (
+        <LateDelayReport onBack={() => setActiveReport(null)} />
       ) : activeReport === 'mobile_allowance' ? (
         // Mobile Allowance Report Detail View
         <div className="space-y-6">
@@ -485,9 +493,6 @@ export const Reports: React.FC = () => {
                         {getDaysInMonth(selectedYear as number, selectedMonth as number)}
                       </div>
                     </div>
-                    <div className="text-sm font-bold text-black">
-                      *30 Tk. - Total Deduction
-                    </div>
                   </div>
 
                   {/* Right Column: Deduction Table Lookup */}
@@ -550,24 +555,7 @@ export const Reports: React.FC = () => {
           )}
         </div>
       ) : activeReport === 'overtime_summary' ? (
-        // Overtime Summary Report View
-        <div className="space-y-6">
-          <div className="flex items-center gap-3 bg-white p-4 rounded-xl border border-gray-200 shadow-sm print:hidden">
-            <Button 
-              variant="outline" 
-              size="icon" 
-              onClick={() => setActiveReport(null)}
-            >
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
-            <div>
-              <h1 className="text-xl font-bold text-gray-900">Overtime Report</h1>
-              <p className="text-xs text-gray-500">Back to Dashboard</p>
-            </div>
-          </div>
-          
-          <SummaryReportView employees={employees} otRecords={otRecords} />
-        </div>
+        <SummaryReportView employees={employees} otRecords={otRecords} onBack={() => setActiveReport(null)} />
       ) : activeReport === 'employee_records' ? (
         <EmployeeRecordsReport onBack={() => setActiveReport(null)} />
       ) : null}

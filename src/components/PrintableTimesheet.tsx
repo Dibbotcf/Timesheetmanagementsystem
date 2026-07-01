@@ -256,13 +256,13 @@ export const PrintableTimesheet: React.FC<Props> = ({
         return null;
     }, [timesheet.year, timesheet.month, daysInMonth, template]);
 
-    // Build the auto-remark for row 09: "3(1), 15(2)" format
+    // Build the auto-remark for row 09: dates only "1, 2, 3, 14, 15" (no hours — keeps column compact)
     const otDatesRemark = useMemo((): string => {
         return Object.entries(otByDay)
             .map(([dayStr, hours]) => ({ day: Number(dayStr), hours }))
             .filter(e => e.day !== lastWorkingDay && e.hours > 0)
             .sort((a, b) => a.day - b.day)
-            .map(e => `${e.day}(${fmtOT(e.hours)})`)
+            .map(e => `${e.day}`)
             .join(', ');
     }, [otByDay, lastWorkingDay]);
 
@@ -310,7 +310,14 @@ export const PrintableTimesheet: React.FC<Props> = ({
         return new Date(prevYear, prevMonthIndex, lastDay)
             .toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
     }, [prevLastWorkingDayStr, timesheet.month, timesheet.year]);
-    
+
+    // Extract just the day number from prevLastWorkingDayStr (e.g. "2026-05-24" → 24)
+    const prevMonthLastDayNum = useMemo((): number | null => {
+        if (!prevLastWorkingDayStr) return null;
+        const d = Number(prevLastWorkingDayStr.split('-')[2]);
+        return isNaN(d) ? null : d;
+    }, [prevLastWorkingDayStr]);
+
     const days = useMemo(() => {
         return Array.from({ length: daysInMonth }, (_, i) => {
             const date = i + 1;
@@ -773,7 +780,19 @@ export const PrintableTimesheet: React.FC<Props> = ({
                                              }
                                              // OT rows
                                              if (row.sl === '07') displayValue = prevMonthEndOT > 0 ? fmtOT(prevMonthEndOT) : '0';
-                                             if (row.sl === '09') displayValue = totalOT > 0 ? fmtOT(totalOT) : '0';
+                                             if (row.sl === '09') {
+                                                 displayValue = totalOT > 0 ? fmtOT(totalOT) : '0';
+                                             }
+                                             // Row 09 with prev month OT: custom two-tone display
+                                             if (row.sl === '09' && prevMonthEndOT > 0 && totalOT > 0) {
+                                                 const thisMonthOT = parseFloat((totalOT - prevMonthEndOT).toFixed(2));
+                                                 return (
+                                                     <div className="w-full h-full flex items-center justify-center gap-[2px]">
+                                                         <span className={`${fontRegular} text-[11px] text-gray-400`}>({fmtOT(thisMonthOT)}+{fmtOT(prevMonthEndOT)})=</span>
+                                                         <span className={`${fontBold} text-[11px] text-blue-700`}>{fmtOT(totalOT)}</span>
+                                                     </div>
+                                                 );
+                                             }
                                              const cellClass = row.sl === '04'
                                                  ? `${fontBold} text-red-600 text-[11px]`
                                                  : row.sl === '06'
@@ -802,13 +821,14 @@ export const PrintableTimesheet: React.FC<Props> = ({
                                                  align="left"
                                              />
                                          ) : row.sl === '09' ? (
-                                             <InputCell
-                                                 isEditing={false}
-                                                 value={otDatesRemark}
-                                                 onChange={() => {}}
-                                                 className={`${fontRegular} text-[11px] text-blue-700`}
-                                                 align="left"
-                                             />
+                                             <div className={`w-full h-full flex items-center justify-start pl-1`}>
+                                                 <span className={`block truncate ${fontRegular} text-[11px]`}>
+                                                     {prevMonthEndOT > 0 && prevMonthLastDayNum !== null && (
+                                                         <span className="text-orange-500">{prevMonthLastDayNum}{otDatesRemark ? ', ' : ''}</span>
+                                                     )}
+                                                     <span className="text-blue-700">{otDatesRemark}</span>
+                                                 </span>
+                                             </div>
                                          ) : row.sl === '01' ? (
                                              <InputCell isEditing={false} value={leaveDateRemarks.sick} onChange={() => {}} className={`${fontRegular} text-[11px] text-[#7b3f3f]`} align="left" />
                                          ) : row.sl === '02' ? (
