@@ -16,6 +16,36 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '../components/ui/command';
 
+// --- Hard Copy Deadline Helpers ---
+function addWorkingDays(from: Date, days: number): Date {
+  let count = 0;
+  const d = new Date(from);
+  while (count < days) {
+    d.setDate(d.getDate() + 1);
+    const dow = d.getDay();
+    if (dow !== 0 && dow !== 6) count++;
+  }
+  return d;
+}
+
+function getHardCopyDeadlineDays(type: LeaveType, isPartial: boolean): number | null {
+  if (type === 'Sick') return 5;
+  if (type === 'Casual' || type === 'Annual') return 2;
+  if (type === 'Other' && !isPartial) return 2;
+  return null; // Maternity or partial Other — not applicable
+}
+
+function getWorkingDayPath(from: Date, count: number): Date[] {
+  const days: Date[] = [];
+  const d = new Date(from);
+  while (days.length < count) {
+    d.setDate(d.getDate() + 1);
+    const dow = d.getDay();
+    if (dow !== 0 && dow !== 6) days.push(new Date(d));
+  }
+  return days;
+}
+
 // --- Leave Config Constants ---
 const LEAVE_LIMITS = {
   Casual: 10,
@@ -29,8 +59,9 @@ export const LeaveManagement: React.FC = () => {
   const { employees, leaves, addLeave, updateLeave, deleteLeave, updateEmployee, deleteEmployee, currentUser, leaveFolders, addLeaveFolder, deleteLeaveFolder, savedLeaveReports, addSavedLeaveReport, deleteSavedLeaveReport, getItem } = useAppStore();
   
   const isStaff = currentUser?.role === 'Staff';
+  const isDIC = isStaff && currentUser?.designation === 'DIC';
 
-  const [viewMode, setViewMode] = useState<'individual' | 'list' | 'records' | 'pending'>('individual');
+  const [viewMode, setViewMode] = useState<'individual' | 'list' | 'records' | 'pending' | 'dashboard'>('individual');
   const [pendingSearchQuery, setPendingSearchQuery] = useState('');
   const [pendingTypeFilter, setPendingTypeFilter] = useState('All');
   const [pendingMonthFilter, setPendingMonthFilter] = useState('');
@@ -463,7 +494,10 @@ export const LeaveManagement: React.FC = () => {
      );
   }
 
-  const globalPendingLeavesCount = leaves.filter(l => l.status === 'Pending').length;
+  const globalPendingLeavesCount = leaves.filter(l =>
+    l.status === 'Pending' ||
+    (l.status === 'Approved' && !l.hardCopyCollected && getHardCopyDeadlineDays(l.type, !!l.partialHours) !== null)
+  ).length;
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto pb-20">
@@ -489,19 +523,29 @@ export const LeaveManagement: React.FC = () => {
             >
                 <LayoutList className="h-4 w-4" /> {isStaff ? 'My Summary' : 'All Employees'}
             </Button>
+            {isDIC && (
+                <Button
+                    variant={viewMode === 'dashboard' ? 'secondary' : 'ghost'}
+                    size="sm"
+                    onClick={() => setViewMode('dashboard')}
+                    className="gap-2"
+                >
+                    <LayoutList className="h-4 w-4" /> Dashboard
+                </Button>
+            )}
              {!isStaff && (
                 <>
-                  <Button 
-                      variant={viewMode === 'records' ? 'secondary' : 'ghost'} 
-                      size="sm" 
+                  <Button
+                      variant={viewMode === 'records' ? 'secondary' : 'ghost'}
+                      size="sm"
                       onClick={() => setViewMode('records')}
                       className="gap-2"
                   >
                       <Folder className="h-4 w-4" /> Records
                   </Button>
-                  <Button 
-                      variant={viewMode === 'pending' ? 'secondary' : 'ghost'} 
-                      size="sm" 
+                  <Button
+                      variant={viewMode === 'pending' ? 'secondary' : 'ghost'}
+                      size="sm"
                       onClick={() => setViewMode('pending')}
                       className="gap-2"
                   >
@@ -1113,6 +1157,44 @@ export const LeaveManagement: React.FC = () => {
                                                     {format(parseISO(leave.startDate), 'MMM dd, yyyy')} - {format(parseISO(leave.endDate), 'MMM dd, yyyy')}
                                                 </h4>
                                                 <p className="text-sm text-gray-600 mt-1">{leave.reason}</p>
+                                                {/* Hard copy status */}
+                                                {(() => {
+                                                    const hcDays = getHardCopyDeadlineDays(leave.type, !!leave.partialHours);
+                                                    if (hcDays === null) return null;
+                                                    return (
+                                                        <div style={{ marginTop: '6px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                            {leave.hardCopyCollected ? (
+                                                                <>
+                                                                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: '#16a34a', color: '#fff', fontSize: '10px', fontWeight: 600, padding: '2px 8px', borderRadius: '9999px' }}>
+                                                                        <Check className="h-2.5 w-2.5" /> Hard copy received
+                                                                    </span>
+                                                                    {!isStaff && isPending && (
+                                                                        <button
+                                                                            onClick={() => updateLeave(leave.id, { hardCopyCollected: false })}
+                                                                            style={{ fontSize: '10px', color: '#94a3b8', background: 'transparent', border: '1px solid #e2e8f0', borderRadius: '5px', padding: '1px 6px', cursor: 'pointer' }}
+                                                                        >
+                                                                            Undo
+                                                                        </button>
+                                                                    )}
+                                                                </>
+                                                            ) : (
+                                                                <>
+                                                                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: '#f59e0b', color: '#fff', fontSize: '10px', fontWeight: 600, padding: '2px 8px', borderRadius: '9999px' }}>
+                                                                        <AlertCircle className="h-2.5 w-2.5" /> Hard copy not submitted
+                                                                    </span>
+                                                                    {!isStaff && (
+                                                                        <button
+                                                                            onClick={() => updateLeave(leave.id, { hardCopyCollected: true })}
+                                                                            style={{ fontSize: '10px', color: '#374151', background: 'transparent', border: '1px solid #d1d5db', borderRadius: '5px', padding: '1px 6px', cursor: 'pointer' }}
+                                                                        >
+                                                                            Mark received
+                                                                        </button>
+                                                                    )}
+                                                                </>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                })()}
                                             </div>
                                             <div className="flex items-center gap-1 shrink-0">
                                                 {/* Admin approve/reject buttons for Pending */}
@@ -1398,31 +1480,61 @@ export const LeaveManagement: React.FC = () => {
              </div>
          </div>
       ) : viewMode === 'pending' && !isStaff ? (
-        <Card>
-            <CardHeader>
-                <CardTitle className="flex justify-between items-center">
-                    <div className="flex items-center gap-2 text-amber-800">
-                        ⏳ Pending Leave Approvals
-                        <Badge className="bg-amber-500 hover:bg-amber-600 text-white">{globalPendingLeavesCount}</Badge>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            {/* ── Header Card ── */}
+            <div style={{ background: '#fff', borderRadius: '16px', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.06)', overflow: 'hidden' }}>
+                {/* Title + Stats */}
+                <div style={{ padding: '20px 24px 16px', borderBottom: '1px solid #f1f5f9' }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '16px', flexWrap: 'wrap' }}>
+                        <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                <h2 style={{ fontSize: '17px', fontWeight: 700, color: '#0f172a', margin: 0 }}>Leave Approvals</h2>
+                                <span style={{ background: '#f59e0b', color: '#fff', fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '9999px' }}>{globalPendingLeavesCount}</span>
+                            </div>
+                            <p style={{ fontSize: '12px', color: '#94a3b8', marginTop: '3px', margin: '3px 0 0' }}>Review pending requests · Track document submissions</p>
+                        </div>
+                        {/* Live stat chips */}
+                        {(() => {
+                            const allItems = leaves.filter(l =>
+                                l.status === 'Pending' ||
+                                (l.status === 'Approved' && !l.hardCopyCollected && getHardCopyDeadlineDays(l.type, !!l.partialHours) !== null)
+                            );
+                            const todayMid = new Date(); todayMid.setHours(0,0,0,0);
+                            const overdueN = allItems.filter(l => {
+                                const dd = getHardCopyDeadlineDays(l.type, !!l.partialHours);
+                                if (!dd || l.hardCopyCollected) return false;
+                                const dl = addWorkingDays(l.createdAt ? new Date(l.createdAt) : parseISO(l.startDate), dd);
+                                dl.setHours(0,0,0,0);
+                                return todayMid > dl;
+                            }).length;
+                            const pendingApprovalN = allItems.filter(l => l.status === 'Pending').length;
+                            const awaitingDocN = allItems.filter(l => l.status === 'Approved').length;
+                            return (
+                                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                                    {overdueN > 0 && (
+                                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca', fontSize: '11px', fontWeight: 600, padding: '4px 10px', borderRadius: '8px' }}>
+                                            <AlertCircle className="h-3 w-3" /> {overdueN} Overdue
+                                        </span>
+                                    )}
+                                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: '#fffbeb', color: '#92400e', border: '1px solid #fde68a', fontSize: '11px', fontWeight: 600, padding: '4px 10px', borderRadius: '8px' }}>
+                                        <RefreshCw className="h-3 w-3" /> {pendingApprovalN} Needs Approval
+                                    </span>
+                                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: '#eff6ff', color: '#1e40af', border: '1px solid #bfdbfe', fontSize: '11px', fontWeight: 600, padding: '4px 10px', borderRadius: '8px' }}>
+                                        <History className="h-3 w-3" /> {awaitingDocN} Awaiting Document
+                                    </span>
+                                </div>
+                            );
+                        })()}
                     </div>
-                </CardTitle>
-                <CardDescription>Review and manage all pending leave requests.</CardDescription>
-            </CardHeader>
-            <CardContent>
-                <div className="flex flex-col md:flex-row gap-4 mb-6">
-                    <div className="relative flex-1">
-                        <Input 
-                            placeholder="Search employee by name or ID..."
-                            value={pendingSearchQuery}
-                            onChange={(e) => setPendingSearchQuery(e.target.value)}
-                            className="pl-9"
-                        />
-                        <User className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+                </div>
+                {/* Filters */}
+                <div style={{ padding: '14px 24px', display: 'flex', gap: '10px', flexWrap: 'wrap', background: '#fafafa' }}>
+                    <div style={{ position: 'relative', flex: 1, minWidth: '180px' }}>
+                        <Input placeholder="Search employee by name or ID..." value={pendingSearchQuery} onChange={(e) => setPendingSearchQuery(e.target.value)} className="pl-9 h-9 text-sm" />
+                        <User className="absolute left-3 top-2.5 h-3.5 w-3.5 text-gray-400" />
                     </div>
                     <Select value={pendingEmployeeFilter} onValueChange={setPendingEmployeeFilter}>
-                        <SelectTrigger className="w-[200px]">
-                            <SelectValue placeholder="All Employees" />
-                        </SelectTrigger>
+                        <SelectTrigger className="w-[180px] h-9 text-sm"><SelectValue placeholder="All Employees" /></SelectTrigger>
                         <SelectContent>
                             <SelectItem value="All">All Employees</SelectItem>
                             {employees.filter(e => e.status === 'Active').map(emp => (
@@ -1430,17 +1542,11 @@ export const LeaveManagement: React.FC = () => {
                             ))}
                         </SelectContent>
                     </Select>
-                    <input 
-                        type="month" 
-                        value={pendingMonthFilter} 
-                        onChange={e => setPendingMonthFilter(e.target.value)} 
-                        className="h-10 px-3 border border-gray-200 rounded-md text-sm bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-700 w-[180px]"
-                        title="Filter by month"
-                    />
+                    <input type="month" value={pendingMonthFilter} onChange={e => setPendingMonthFilter(e.target.value)}
+                        className="h-9 px-3 border border-gray-200 rounded-md text-sm bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-700"
+                        style={{ minWidth: '150px' }} title="Filter by month" />
                     <Select value={pendingTypeFilter} onValueChange={setPendingTypeFilter}>
-                        <SelectTrigger className="w-[180px]">
-                            <SelectValue placeholder="All Types" />
-                        </SelectTrigger>
+                        <SelectTrigger className="w-[140px] h-9 text-sm"><SelectValue placeholder="All Types" /></SelectTrigger>
                         <SelectContent>
                             <SelectItem value="All">All Types</SelectItem>
                             <SelectItem value="Casual">Casual</SelectItem>
@@ -1451,77 +1557,303 @@ export const LeaveManagement: React.FC = () => {
                         </SelectContent>
                     </Select>
                 </div>
-                
-                <div className="space-y-3">
-                    {(() => {
-                        const pendingLeaves = leaves.filter(l => l.status === 'Pending');
-                        const filtered = pendingLeaves.filter(leave => {
-                            const emp = employees.find(e => e.id === leave.employeeId);
-                            const matchesSearch = !pendingSearchQuery || 
-                                (emp?.name || '').toLowerCase().includes(pendingSearchQuery.toLowerCase()) || 
-                                (emp?.eid || '').toLowerCase().includes(pendingSearchQuery.toLowerCase());
-                            const matchesType = pendingTypeFilter === 'All' || leave.type === pendingTypeFilter;
-                            const matchesEmployee = pendingEmployeeFilter === 'All' || leave.employeeId === pendingEmployeeFilter;
-                            
-                            let matchesMonth = true;
-                            if (pendingMonthFilter) {
-                                const leaveStartMonth = leave.startDate.substring(0, 7);
-                                const leaveEndMonth = leave.endDate.substring(0, 7);
-                                matchesMonth = leaveStartMonth === pendingMonthFilter || leaveEndMonth === pendingMonthFilter;
-                            }
-                            
-                            return matchesSearch && matchesType && matchesEmployee && matchesMonth;
-                        });
+            </div>
 
-                        if (filtered.length === 0) {
-                            return (
-                                <div className="text-center py-10 text-gray-500 bg-gray-50 rounded-lg border border-dashed">
-                                    No pending leaves found matching your criteria.
+            {/* ── Leave Cards ── */}
+            {(() => {
+                const AVATAR_COLORS = ['#6366f1','#8b5cf6','#ec4899','#f43f5e','#14b8a6','#3b82f6','#f59e0b','#10b981'];
+                const TYPE_COLORS: Record<string, string> = { Casual: '#f59e0b', Sick: '#ef4444', Annual: '#3b82f6', Maternity: '#ec4899', Other: '#8b5cf6' };
+
+                const allLeaves = leaves.filter(l =>
+                    l.status === 'Pending' ||
+                    (l.status === 'Approved' && !l.hardCopyCollected && getHardCopyDeadlineDays(l.type, !!l.partialHours) !== null)
+                );
+                const filtered = allLeaves.filter(leave => {
+                    const emp = employees.find(e => e.id === leave.employeeId);
+                    const matchesSearch = !pendingSearchQuery ||
+                        (emp?.name || '').toLowerCase().includes(pendingSearchQuery.toLowerCase()) ||
+                        (emp?.eid || '').toLowerCase().includes(pendingSearchQuery.toLowerCase());
+                    const matchesType = pendingTypeFilter === 'All' || leave.type === pendingTypeFilter;
+                    const matchesEmployee = pendingEmployeeFilter === 'All' || leave.employeeId === pendingEmployeeFilter;
+                    let matchesMonth = true;
+                    if (pendingMonthFilter) {
+                        matchesMonth = leave.startDate.substring(0,7) === pendingMonthFilter || leave.endDate.substring(0,7) === pendingMonthFilter;
+                    }
+                    return matchesSearch && matchesType && matchesEmployee && matchesMonth;
+                });
+
+                if (filtered.length === 0) return (
+                    <div style={{ background: '#fff', borderRadius: '16px', border: '1px dashed #e2e8f0', padding: '48px 24px', textAlign: 'center' }}>
+                        <div style={{ fontSize: '32px', marginBottom: '8px' }}>🎉</div>
+                        <p style={{ fontSize: '15px', fontWeight: 600, color: '#374151' }}>All caught up!</p>
+                        <p style={{ fontSize: '13px', color: '#94a3b8', marginTop: '4px' }}>No pending leave requests match your filters.</p>
+                    </div>
+                );
+
+                // Sort: overdue first → pending approval → awaiting doc, then by deadline
+                const todayMid = new Date(); todayMid.setHours(0,0,0,0);
+                const withMeta = filtered.map(l => {
+                    const dd = getHardCopyDeadlineDays(l.type, !!l.partialHours);
+                    const applied = l.createdAt ? new Date(l.createdAt) : parseISO(l.startDate);
+                    const dl = dd !== null ? addWorkingDays(applied, dd) : null;
+                    if (dl) dl.setHours(0,0,0,0);
+                    const overdue = dl ? todayMid > dl && !l.hardCopyCollected : false;
+                    return { l, dl, overdue, dd, applied };
+                });
+                withMeta.sort((a, b) => {
+                    if (a.overdue !== b.overdue) return a.overdue ? -1 : 1;
+                    if (a.l.status !== b.l.status) return a.l.status === 'Pending' ? -1 : 1;
+                    if (a.dl && b.dl) return a.dl.getTime() - b.dl.getTime();
+                    return 0;
+                });
+
+                return withMeta.map(({ l: leave, dl: deadline, overdue: isOverdue, dd: deadlineDays, applied: appliedDate }) => {
+                    const emp = employees.find(e => e.id === leave.employeeId);
+                    const needsHardCopy = deadline !== null;
+                    const canApprove = !needsHardCopy || !!leave.hardCopyCollected;
+                    const isAlreadyApproved = leave.status === 'Approved';
+                    const initials = (emp?.name || 'U').split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0,2);
+                    const avatarColor = AVATAR_COLORS[(emp?.name || 'U').charCodeAt(0) % AVATAR_COLORS.length];
+                    const typeColor = TYPE_COLORS[leave.type] || '#64748b';
+                    const accentColor = isOverdue ? '#ef4444' : isAlreadyApproved ? '#3b82f6' : '#f59e0b';
+                    const workingDays = deadlineDays !== null ? getWorkingDayPath(appliedDate, deadlineDays) : [];
+
+                    return (
+                        <div key={leave.id} style={{ background: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', borderLeft: `4px solid ${accentColor}`, boxShadow: '0 1px 3px rgba(0,0,0,0.05)', padding: '10px 16px' }}>
+                            {/* Single compact row */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                                {/* Avatar */}
+                                <div style={{ width: '36px', height: '36px', borderRadius: '50%', background: avatarColor, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                    <span style={{ color: '#fff', fontWeight: 700, fontSize: '12px' }}>{initials}</span>
                                 </div>
-                            );
-                        }
 
-                        return filtered.map(leave => {
-                            const emp = employees.find(e => e.id === leave.employeeId);
-                            return (
-                                <div key={leave.id} className="flex items-center justify-between gap-3 bg-white rounded-lg border border-amber-200 px-4 py-3">
-                                    <div className="flex-1 min-w-0">
-                                        <div className="flex items-center gap-2 flex-wrap">
-                                            <span className="font-semibold text-sm">{emp?.name ?? 'Unknown'}</span>
-                                            <span className="text-xs text-gray-500">({emp?.eid})</span>
-                                            <Badge variant="outline" className="text-xs">{leave.type}</Badge>
-                                            <span className="text-xs text-gray-600">{leave.partialHours ? `${leave.partialHours} hour${leave.partialHours > 1 ? 's' : ''}` : `${leave.days} day${leave.days > 1 ? 's' : ''}`}</span>
+                                {/* Employee info */}
+                                <div style={{ flex: 1, minWidth: '180px' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                                        <span style={{ fontSize: '13px', fontWeight: 700, color: '#0f172a' }}>{emp?.name ?? 'Unknown'}</span>
+                                        <span style={{ fontSize: '10px', color: '#94a3b8' }}>{emp?.eid}</span>
+                                        <span style={{ display: 'inline-flex', alignItems: 'center', background: `${typeColor}18`, color: typeColor, fontSize: '9px', fontWeight: 700, padding: '1px 6px', borderRadius: '4px', border: `1px solid ${typeColor}25` }}>{leave.type}</span>
+                                        <span style={{ fontSize: '11px', color: '#64748b' }}>{leave.partialHours ? `${leave.partialHours} hr` : `${leave.days} day${leave.days > 1 ? 's' : ''}`}</span>
+                                    </div>
+                                    <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px' }}>
+                                        <span style={{ color: '#475569' }}>{format(parseISO(leave.startDate), 'MMM dd')} – {format(parseISO(leave.endDate), 'MMM dd, yyyy')}</span>
+                                        <span style={{ margin: '0 4px' }}>·</span>
+                                        <span style={{ fontStyle: 'italic' }}>"{leave.reason}"</span>
+                                    </div>
+                                </div>
+
+                                {/* Timeline circles (only when hard copy pending) */}
+                                {needsHardCopy && !leave.hardCopyCollected && (
+                                    <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+                                        {workingDays.map((d, i, arr) => {
+                                            const isDeadlineDay = i === arr.length - 1;
+                                            const dNorm = new Date(d); dNorm.setHours(0,0,0,0);
+                                            const isPastDay = dNorm < todayMid;
+                                            const isTodayDay = dNorm.getTime() === todayMid.getTime();
+                                            let bg = '#fff', border = '#e2e8f0', col = '#94a3b8', fw: number = 500;
+                                            if (isDeadlineDay) { bg = isOverdue ? '#ef4444' : '#f59e0b'; border = bg; col = '#fff'; fw = 700; }
+                                            else if (isPastDay) { bg = '#f1f5f9'; border = '#e2e8f0'; col = '#cbd5e1'; }
+                                            else if (isTodayDay) { border = '#3b82f6'; col = '#1d4ed8'; fw = 700; }
+                                            return (
+                                                <React.Fragment key={i}>
+                                                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1px' }}>
+                                                        <div style={{ width: '34px', height: '34px', borderRadius: '50%', background: bg, border: `2px solid ${border}`, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', lineHeight: 1 }}>
+                                                            <span style={{ fontSize: '6px', color: col, fontWeight: 600, textTransform: 'uppercase' }}>{format(d, 'MMM')}</span>
+                                                            <span style={{ fontSize: '12px', color: col, fontWeight: fw }}>{format(d, 'd')}</span>
+                                                        </div>
+                                                        <span style={{ fontSize: '7px', color: isDeadlineDay ? (isOverdue ? '#ef4444' : '#f59e0b') : 'transparent', fontWeight: 700, lineHeight: 1 }}>Deadline</span>
+                                                    </div>
+                                                    {i < arr.length - 1 && <div style={{ width: '10px', height: '2px', background: '#e2e8f0', marginBottom: '9px', flexShrink: 0 }} />}
+                                                </React.Fragment>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+
+                                {/* Doc received badge */}
+                                {leave.hardCopyCollected && needsHardCopy && (
+                                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: '#f0fdf4', color: '#15803d', border: '1px solid #bbf7d0', fontSize: '10px', fontWeight: 600, padding: '3px 8px', borderRadius: '6px', flexShrink: 0 }}>
+                                        <Check className="h-2.5 w-2.5" /> Doc received
+                                    </span>
+                                )}
+
+                                {/* Action buttons */}
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                                    {/* Mark received button */}
+                                    {needsHardCopy && !leave.hardCopyCollected && (
+                                        <button
+                                            onClick={() => updateLeave(leave.id, { hardCopyCollected: true })}
+                                            style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: '#eff6ff', color: '#1d4ed8', fontSize: '11px', fontWeight: 700, padding: '5px 10px', borderRadius: '7px', border: '1.5px solid #bfdbfe', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                                            onMouseEnter={e => (e.currentTarget.style.background = '#dbeafe')}
+                                            onMouseLeave={e => (e.currentTarget.style.background = '#eff6ff')}
+                                        >
+                                            <File className="h-3 w-3" /> Mark Received
+                                        </button>
+                                    )}
+                                    {/* Approve/Reject */}
+                                    {!isAlreadyApproved && (
+                                        <>
+                                            {leave.hardCopyCollected ? (
+                                                <>
+                                                    <button
+                                                        onClick={() => updateLeave(leave.id, { hardCopyCollected: false })}
+                                                        style={{ fontSize: '10px', color: '#94a3b8', background: 'transparent', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '4px 8px', cursor: 'pointer' }}
+                                                        onMouseEnter={e => (e.currentTarget.style.background = '#f8fafc')}
+                                                        onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                                                    >Undo</button>
+                                                    <button
+                                                        onClick={() => { updateLeave(leave.id, { status: 'Approved' }); toast.success(`Leave approved for ${emp?.name}`); }}
+                                                        style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: '#16a34a', color: '#fff', fontSize: '11px', fontWeight: 600, padding: '5px 12px', borderRadius: '9999px', border: 'none', cursor: 'pointer' }}
+                                                        onMouseEnter={e => (e.currentTarget.style.background = '#15803d')}
+                                                        onMouseLeave={e => (e.currentTarget.style.background = '#16a34a')}
+                                                    ><Check className="h-3 w-3" /> Approve</button>
+                                                </>
+                                            ) : (
+                                                <button
+                                                    style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: '#f1f5f9', color: '#94a3b8', fontSize: '11px', fontWeight: 600, padding: '5px 12px', borderRadius: '9999px', border: 'none', cursor: 'not-allowed', opacity: 0.45 }}
+                                                    title="Mark document received first"
+                                                ><Check className="h-3 w-3" /> Approve</button>
+                                            )}
+                                            <button
+                                                onClick={() => { updateLeave(leave.id, { status: 'Rejected' }); toast.error(`Leave rejected for ${emp?.name}`); }}
+                                                style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: isOverdue ? '#ef4444' : 'transparent', color: isOverdue ? '#fff' : '#ef4444', fontSize: '11px', fontWeight: 600, padding: '5px 12px', borderRadius: '9999px', border: '1.5px solid #ef4444', cursor: 'pointer' }}
+                                                onMouseEnter={e => { e.currentTarget.style.background = '#ef4444'; e.currentTarget.style.color = '#fff'; }}
+                                                onMouseLeave={e => { e.currentTarget.style.background = isOverdue ? '#ef4444' : 'transparent'; e.currentTarget.style.color = isOverdue ? '#fff' : '#ef4444'; }}
+                                            ><X className="h-3 w-3" /> Reject</button>
+                                        </>
+                                    )}
+                                    {/* Status pill */}
+                                    {isOverdue && !leave.hardCopyCollected ? (
+                                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', background: '#ef4444', color: '#fff', fontSize: '9px', fontWeight: 700, padding: '3px 7px', borderRadius: '9999px', whiteSpace: 'nowrap' }}>
+                                            <AlertCircle className="h-2.5 w-2.5" /> Overdue
+                                        </span>
+                                    ) : isAlreadyApproved ? (
+                                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', background: '#2563eb', color: '#fff', fontSize: '9px', fontWeight: 600, padding: '3px 7px', borderRadius: '9999px', whiteSpace: 'nowrap' }}>
+                                            <Check className="h-2.5 w-2.5" /> Awaiting Doc
+                                        </span>
+                                    ) : (
+                                        <span style={{ display: 'inline-flex', background: '#fffbeb', color: '#92400e', border: '1px solid #fde68a', fontSize: '9px', fontWeight: 600, padding: '3px 7px', borderRadius: '9999px', whiteSpace: 'nowrap' }}>
+                                            Needs Approval
+                                        </span>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    );
+                });
+            })()}
+        </div>
+      ) : viewMode === 'dashboard' && isDIC ? (() => {
+        const AVATAR_COLORS = ['#6366f1','#8b5cf6','#ec4899','#f43f5e','#14b8a6','#3b82f6','#f59e0b','#10b981'];
+        const TYPE_COLORS: Record<string, string> = { Casual: '#f59e0b', Sick: '#ef4444', Annual: '#3b82f6', Maternity: '#ec4899', Other: '#8b5cf6' };
+        const todayMid = new Date(); todayMid.setHours(0,0,0,0);
+
+        const myPending = leaves.filter(l => l.employeeId === currentUser!.id && l.status === 'Pending');
+        const othersPending = leaves.filter(l => l.employeeId !== currentUser!.id && (
+            l.status === 'Pending' ||
+            (l.status === 'Approved' && !l.hardCopyCollected && getHardCopyDeadlineDays(l.type, !!l.partialHours) !== null)
+        ));
+
+        const renderCard = (leave: typeof leaves[0], showName: boolean) => {
+            const emp = employees.find(e => e.id === leave.employeeId);
+            const dd = getHardCopyDeadlineDays(leave.type, !!leave.partialHours);
+            const applied = leave.createdAt ? new Date(leave.createdAt) : parseISO(leave.startDate);
+            const dl = dd !== null ? addWorkingDays(applied, dd) : null;
+            if (dl) dl.setHours(0,0,0,0);
+            const isOverdue = dl ? todayMid > dl && !leave.hardCopyCollected : false;
+            const workingDays = dd !== null ? getWorkingDayPath(applied, dd) : [];
+            const typeColor = TYPE_COLORS[leave.type] || '#64748b';
+            const avatarColor = AVATAR_COLORS[(emp?.name || 'U').charCodeAt(0) % AVATAR_COLORS.length];
+            const initials = (emp?.name || 'U').split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0,2);
+            const accentColor = isOverdue ? '#ef4444' : leave.status === 'Approved' ? '#3b82f6' : '#f59e0b';
+            return (
+                <div key={leave.id} style={{ background: '#fff', borderRadius: '10px', border: '1px solid #e2e8f0', borderLeft: `4px solid ${accentColor}`, padding: '10px 14px', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                    {showName && (
+                        <div style={{ width: '34px', height: '34px', borderRadius: '50%', background: avatarColor, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                            <span style={{ color: '#fff', fontWeight: 700, fontSize: '11px' }}>{initials}</span>
+                        </div>
+                    )}
+                    <div style={{ flex: 1, minWidth: '140px' }}>
+                        {showName && <div style={{ fontSize: '12px', fontWeight: 700, color: '#0f172a' }}>{emp?.name ?? 'Unknown'} <span style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 400 }}>{emp?.eid}</span></div>}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap', marginTop: showName ? '2px' : 0 }}>
+                            <span style={{ display: 'inline-flex', background: `${typeColor}18`, color: typeColor, fontSize: '9px', fontWeight: 700, padding: '1px 6px', borderRadius: '4px', border: `1px solid ${typeColor}25` }}>{leave.type}</span>
+                            <span style={{ fontSize: '11px', color: '#475569' }}>{format(parseISO(leave.startDate), 'MMM dd')} – {format(parseISO(leave.endDate), 'MMM dd, yyyy')}</span>
+                            <span style={{ fontSize: '11px', color: '#94a3b8', fontStyle: 'italic', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '160px' }}>"{leave.reason}"</span>
+                        </div>
+                    </div>
+                    {workingDays.length > 0 && (
+                        <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+                            {workingDays.map((d, i, arr) => {
+                                const isDeadlineDay = i === arr.length - 1;
+                                const dNorm = new Date(d); dNorm.setHours(0,0,0,0);
+                                const isPastDay = dNorm < todayMid;
+                                const isTodayDay = dNorm.getTime() === todayMid.getTime();
+                                let bg = '#fff', border = '#e2e8f0', col = '#94a3b8', fw: number = 500;
+                                if (isDeadlineDay) { bg = isOverdue ? '#ef4444' : '#f59e0b'; border = bg; col = '#fff'; fw = 700; }
+                                else if (isPastDay) { bg = '#f1f5f9'; border = '#e2e8f0'; col = '#cbd5e1'; }
+                                else if (isTodayDay) { border = '#3b82f6'; col = '#1d4ed8'; fw = 700; }
+                                return (
+                                    <React.Fragment key={i}>
+                                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1px' }}>
+                                            <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: bg, border: `2px solid ${border}`, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', lineHeight: 1 }}>
+                                                <span style={{ fontSize: '6px', color: col, fontWeight: 600, textTransform: 'uppercase' }}>{format(d, 'MMM')}</span>
+                                                <span style={{ fontSize: '11px', color: col, fontWeight: fw }}>{format(d, 'd')}</span>
+                                            </div>
+                                            <span style={{ fontSize: '6px', color: isDeadlineDay ? (isOverdue ? '#ef4444' : '#f59e0b') : 'transparent', fontWeight: 700, lineHeight: 1 }}>Deadline</span>
                                         </div>
-                                        <p className="text-xs text-gray-500 mt-0.5">
-                                            {format(parseISO(leave.startDate), 'MMM dd')} – {format(parseISO(leave.endDate), 'MMM dd, yyyy')} · <span className="italic">"{leave.reason}"</span>
-                                        </p>
-                                    </div>
-                                    <div className="flex items-center gap-2 shrink-0">
-                                        <Button
-                                            size="sm"
-                                            className="h-7 px-3 bg-green-600 hover:bg-green-700 text-white text-xs gap-1"
-                                            onClick={() => { updateLeave(leave.id, { status: 'Approved' }); toast.success(`Leave approved for ${emp?.name}`); }}
-                                        >
-                                            <Check className="h-3 w-3" /> Approve
-                                        </Button>
-                                        <Button
-                                            size="sm"
-                                            variant="outline"
-                                            className="h-7 px-3 text-red-600 border-red-300 hover:bg-red-50 text-xs gap-1"
-                                            onClick={() => { updateLeave(leave.id, { status: 'Rejected' }); toast.error(`Leave rejected for ${emp?.name}`); }}
-                                        >
-                                            <X className="h-3 w-3" /> Reject
-                                        </Button>
-                                    </div>
-                                </div>
-                            );
-                        });
-
-                    })()}
+                                        {i < arr.length - 1 && <div style={{ width: '8px', height: '2px', background: '#e2e8f0', marginBottom: '8px', flexShrink: 0 }} />}
+                                    </React.Fragment>
+                                );
+                            })}
+                        </div>
+                    )}
+                    {isOverdue && !leave.hardCopyCollected ? (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', background: '#ef4444', color: '#fff', fontSize: '9px', fontWeight: 700, padding: '3px 8px', borderRadius: '9999px', flexShrink: 0 }}><AlertCircle className="h-2.5 w-2.5" /> Overdue</span>
+                    ) : leave.status === 'Approved' ? (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', background: '#2563eb', color: '#fff', fontSize: '9px', fontWeight: 600, padding: '3px 8px', borderRadius: '9999px', flexShrink: 0 }}><Check className="h-2.5 w-2.5" /> Awaiting Doc</span>
+                    ) : (
+                        <span style={{ display: 'inline-flex', background: '#f59e0b', color: '#fff', fontSize: '9px', fontWeight: 700, padding: '3px 8px', borderRadius: '9999px', flexShrink: 0 }}>Pending</span>
+                    )}
                 </div>
-            </CardContent>
-        </Card>
-      ) : null}
+            );
+        };
+
+        return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+                {/* My Pending Leaves */}
+                <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '14px', padding: '18px 20px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
+                        <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#6366f1' }} />
+                        <span style={{ fontSize: '14px', fontWeight: 700, color: '#0f172a' }}>My Pending Leaves</span>
+                        <span style={{ fontSize: '11px', color: '#94a3b8', background: '#f1f5f9', padding: '1px 7px', borderRadius: '9999px' }}>{myPending.length}</span>
+                    </div>
+                    {myPending.length === 0 ? (
+                        <p style={{ fontSize: '13px', color: '#94a3b8', textAlign: 'center', padding: '24px 0' }}>No pending leaves</p>
+                    ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                            {myPending.map(l => renderCard(l, false))}
+                        </div>
+                    )}
+                </div>
+
+                {/* Others Pending Leaves */}
+                <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '14px', padding: '18px 20px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
+                        <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#f59e0b' }} />
+                        <span style={{ fontSize: '14px', fontWeight: 700, color: '#0f172a' }}>Others Pending Leaves</span>
+                        <span style={{ fontSize: '11px', color: '#94a3b8', background: '#f1f5f9', padding: '1px 7px', borderRadius: '9999px' }}>{othersPending.length}</span>
+                    </div>
+                    {othersPending.length === 0 ? (
+                        <p style={{ fontSize: '13px', color: '#94a3b8', textAlign: 'center', padding: '24px 0' }}>No pending leaves from others</p>
+                    ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                            {othersPending.map(l => renderCard(l, true))}
+                        </div>
+                    )}
+                </div>
+            </div>
+        );
+      })() : null}
     </div>
   );
 };

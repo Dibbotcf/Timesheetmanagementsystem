@@ -188,6 +188,8 @@ export interface LeaveRecord {
   days: number;
   partialHours?: number;
   status: 'Pending' | 'Approved' | 'Rejected';
+  createdAt?: string;
+  hardCopyCollected?: boolean;
 }
 
 export type LeaveRequest = Omit<LeaveRecord, 'id'>;
@@ -756,7 +758,7 @@ export default function App() {
   };
 
   const addLeave = async (leaveData: LeaveRequest) => {
-    const newLeave: LeaveRecord = { ...leaveData, id: Math.random().toString(36).substr(2, 9) };
+    const newLeave: LeaveRecord = { ...leaveData, id: Math.random().toString(36).substr(2, 9), createdAt: new Date().toISOString() };
     if (await saveItem('leaves', newLeave)) {
       setLeaves([...leaves, newLeave]);
     }
@@ -936,7 +938,23 @@ export default function App() {
 
 // --- Layout Component ---
 const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { currentUser, logout, previewData, disablePreview } = useAppStore();
+  const { currentUser, logout, previewData, disablePreview, issues, leaves } = useAppStore();
+  const isAdminUser = currentUser?.role === 'Admin/HR';
+  const pendingIssueCount = isAdminUser
+    ? issues.filter(i => i.status === 'Open').length
+    : issues.filter(i => i.status === 'Open' && i.employeeId === currentUser?.id).length;
+  const isDICUser = currentUser?.role === 'Staff' && currentUser?.designation === 'DIC';
+  const needsHardCopyCheck = (l: LeaveRecord) =>
+    l.type === 'Sick' || l.type === 'Casual' || l.type === 'Annual' || (l.type === 'Other' && !l.partialHours);
+  const pendingLeaveCount = isAdminUser
+    ? leaves.filter(l => l.status === 'Pending' || (l.status === 'Approved' && !l.hardCopyCollected && needsHardCopyCheck(l))).length
+    : leaves.filter(l => l.status === 'Pending' && l.employeeId === currentUser?.id).length;
+  const othersPendingLeaveCount = isDICUser
+    ? leaves.filter(l => l.employeeId !== currentUser?.id && (
+        l.status === 'Pending' ||
+        (l.status === 'Approved' && !l.hardCopyCollected && needsHardCopyCheck(l))
+      )).length
+    : 0;
   const location = useLocation();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
@@ -992,7 +1010,26 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
                   }`}
               >
                 <Icon className="h-5 w-5" />
-                {item.name}
+                <span className="flex-1">{item.name}</span>
+                {(item.name === 'Issues' || item.name === 'Issue Tracker') && pendingIssueCount > 0 && (
+                  <span style={{ background: '#ef4444', color: '#fff', fontSize: '11px', fontWeight: 700, minWidth: '20px', height: '20px', borderRadius: '9999px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 6px' }}>
+                    {pendingIssueCount}
+                  </span>
+                )}
+                {(item.name === 'Leaves' || item.name === 'My Leaves') && (pendingLeaveCount > 0 || othersPendingLeaveCount > 0) && (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                    {pendingLeaveCount > 0 && (
+                      <span style={{ background: '#ef4444', color: '#fff', fontSize: '11px', fontWeight: 700, minWidth: '20px', height: '20px', borderRadius: '9999px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 6px' }}>
+                        {pendingLeaveCount}
+                      </span>
+                    )}
+                    {othersPendingLeaveCount > 0 && (
+                      <span style={{ background: '#f59e0b', color: '#fff', fontSize: '11px', fontWeight: 700, minWidth: '20px', height: '20px', borderRadius: '9999px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 6px' }}>
+                        {othersPendingLeaveCount}
+                      </span>
+                    )}
+                  </span>
+                )}
               </Link>
             );
           })}

@@ -20,6 +20,7 @@ export const TimesheetView: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { timesheets, getTemplate, updateTimesheet, signatures, currentUser, employees, otRecords, leaves, attendanceRecords } = useAppStore();
+  const isDIC = currentUser?.role === 'Staff' && currentUser?.designation === 'DIC';
   
   const [timesheet, setTimesheet] = useState<TimesheetRecord | null>(null);
   const [isEditing, setIsEditing] = useState(false);
@@ -531,9 +532,11 @@ export const TimesheetView: React.FC = () => {
                             <History className="h-5 w-5 text-gray-600" />
                         </Button>
 
+                        {!(isDIC && timesheet?.employeeId !== currentUser?.id) && (
                         <Button variant="outline" onClick={() => { setLocalEntries(displayEntries); setIsEditing(true); }} className="gap-2">
                             <Pencil className="h-4 w-4" /> Edit
                         </Button>
+                        )}
                         <Button
                             onClick={handleDownloadPDF}
                             disabled={isDownloading}

@@ -474,19 +474,21 @@ const DailyView = ({
     currentUser: any
 }) => {
     const isStaff = currentUser?.role === 'Staff';
+    const isDIC = currentUser?.role === 'Staff' && currentUser?.designation === 'DIC';
     const [searchQuery, setSearchQuery] = useState('');
 
     const recordsForDate = useMemo(() => {
         let filtered = otRecords.filter(r => r.date === date);
-        if (isStaff) {
+        // DIC can see all OT records; regular Staff only their own
+        if (isStaff && !isDIC) {
             filtered = filtered.filter(r => r.employeeId === currentUser.id);
         }
         return filtered;
-    }, [otRecords, date, isStaff, currentUser]);
+    }, [otRecords, date, isStaff, isDIC, currentUser]);
 
     const employeeRows = useMemo(() => {
         let targetEmployees = [...employees];
-        
+
         targetEmployees.sort((a, b) => {
             const eIdA = a.eid || '';
             const eIdB = b.eid || '';
@@ -500,7 +502,8 @@ const DailyView = ({
             return eIdA.localeCompare(eIdB);
         });
 
-        if (isStaff) {
+        // DIC can see all employees; regular Staff only their own
+        if (isStaff && !isDIC) {
             targetEmployees = targetEmployees.filter(e => e.id === currentUser.id);
         }
         
@@ -597,14 +600,17 @@ const DailyView = ({
                                         {row.otRecord?.submittedAt ? format(parseISO(row.otRecord.submittedAt), 'dd MMM yyyy, hh:mm a') : '-'}
                                     </TableCell>
                                     <TableCell className="text-right">
-                                        {!row.otRecord ? (
-                                            <Button size="sm" variant="outline" onClick={() => onAddOT(row.id)}>
-                                                <Plus className="h-3 w-3 mr-1" /> Add OT
-                                            </Button>
-                                        ) : (
-                                            <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={() => onEditOT(row.otRecord!)}>
-                                                <Clock className="h-4 w-4 text-blue-600" />
-                                            </Button>
+                                        {/* DIC can only add/edit their own OT */}
+                                        {(isDIC && row.id !== currentUser?.id) ? null : (
+                                            !row.otRecord ? (
+                                                <Button size="sm" variant="outline" onClick={() => onAddOT(row.id)}>
+                                                    <Plus className="h-3 w-3 mr-1" /> Add OT
+                                                </Button>
+                                            ) : (
+                                                <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={() => onEditOT(row.otRecord!)}>
+                                                    <Clock className="h-4 w-4 text-blue-600" />
+                                                </Button>
+                                            )
                                         )}
                                     </TableCell>
                                 </TableRow>
@@ -639,9 +645,11 @@ const MonthlyPersonView = ({
     onRevertOT: (id: string) => void,
     onApproveAll: (records: OTRecord[]) => void
 }) => {
+    const isDIC = currentUser?.role === 'Staff' && currentUser?.designation === 'DIC';
     const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM
     const [selectedDate, setSelectedDate] = useState('');
-    const [selectedEmpIds, setSelectedEmpIds] = useState<string[]>(currentUser.role === 'Staff' ? [currentUser.id] : ['all']);
+    // DIC can see all employees (like Admin); regular Staff only their own
+    const [selectedEmpIds, setSelectedEmpIds] = useState<string[]>((currentUser.role === 'Staff' && !isDIC) ? [currentUser.id] : ['all']);
     const [openEmployeeSelect, setOpenEmployeeSelect] = useState(false);
 
     const filteredRecords = useMemo(() => {
@@ -691,7 +699,7 @@ const MonthlyPersonView = ({
                     </div>
                 </div>
                 {/* Row 2: Employee select + actions */}
-                {currentUser.role !== 'Staff' && (
+                {(currentUser.role !== 'Staff' || isDIC) && (
                     <div className="flex flex-wrap items-center gap-3">
                         <div className="flex items-center gap-2 flex-1 min-w-0">
                             <span className="text-sm font-medium whitespace-nowrap">Employee:</span>
@@ -774,9 +782,9 @@ const MonthlyPersonView = ({
                             </div>
                         </div>
                         <div className="flex items-center gap-3 shrink-0">
-                            {pendingRecords.length > 0 && (
-                                <Button 
-                                    size="sm" 
+                            {pendingRecords.length > 0 && !isDIC && (
+                                <Button
+                                    size="sm"
                                     className="bg-green-600 hover:bg-green-700 text-white gap-2 shrink-0"
                                     onClick={() => onApproveAll(pendingRecords)}
                                 >
@@ -789,8 +797,8 @@ const MonthlyPersonView = ({
                         </div>
                     </div>
                 )}
-                {/* For Staff: just show total */}
-                {currentUser.role === 'Staff' && (
+                {/* For regular Staff (not DIC): just show total */}
+                {currentUser.role === 'Staff' && !isDIC && (
                     <div className="flex justify-end">
                         <div className="bg-blue-50 text-blue-700 px-4 py-2 rounded-md font-medium">
                             Total: {totalHours.toFixed(2)} hrs

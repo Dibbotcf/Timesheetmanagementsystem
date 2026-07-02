@@ -223,6 +223,7 @@ export const Employees: React.FC = () => {
                     <TableHead>EID</TableHead>
                     <TableHead>Name</TableHead>
                     <TableHead>Role</TableHead>
+                    <TableHead>Position</TableHead>
                     <TableHead>Date of Birth</TableHead>
                     <TableHead>Joining Date</TableHead>
                     <TableHead>Status</TableHead>
@@ -249,6 +250,7 @@ export const Employees: React.FC = () => {
                           </div>
                         </TableCell>
                         <TableCell>{emp.role}</TableCell>
+                        <TableCell>{emp.designation || '—'}</TableCell>
                         <TableCell>{new Date(emp.dob).toLocaleDateString()}</TableCell>
                         <TableCell>{emp.joiningDate ? new Date(emp.joiningDate).toLocaleDateString() : '-'}</TableCell>
                         <TableCell>
@@ -400,8 +402,8 @@ export const Employees: React.FC = () => {
             </div>
             <div className="space-y-2">
               <Label htmlFor="role">Role <span className="text-red-500">*</span></Label>
-              <Select 
-                value={formData.role} 
+              <Select
+                value={formData.role}
                 onValueChange={(val: any) => setFormData({...formData, role: val})}
               >
                 <SelectTrigger>
@@ -410,6 +412,21 @@ export const Employees: React.FC = () => {
                 <SelectContent>
                   <SelectItem value="Staff">Staff</SelectItem>
                   <SelectItem value="Admin/HR">Admin/HR</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="position">Position</Label>
+              <Select
+                value={formData.designation || ''}
+                onValueChange={(val) => setFormData({...formData, designation: val})}
+              >
+                <SelectTrigger id="position">
+                  <SelectValue placeholder="Select position" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="DIC">DIC</SelectItem>
+                  <SelectItem value="Member">Member</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -459,6 +476,10 @@ export const Employees: React.FC = () => {
                 <div>
                   <Label className="text-muted-foreground">Role</Label>
                   <div className="font-medium">{viewingEmployee.role}</div>
+                </div>
+                <div>
+                  <Label className="text-muted-foreground">Position</Label>
+                  <div className="font-medium">{viewingEmployee.designation || '—'}</div>
                 </div>
                 <div>
                   <Label className="text-muted-foreground">Date of Birth</Label>

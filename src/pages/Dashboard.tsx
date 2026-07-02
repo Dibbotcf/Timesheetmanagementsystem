@@ -76,7 +76,8 @@ export const StatusSymbol: React.FC<{ status: AttendanceStatus; className?: stri
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
-import { Folder, Plus, FileText, Clock, Trash2, ChevronRight, EyeOff, CalendarDays } from 'lucide-react';
+import { Folder, Plus, FileText, Clock, Trash2, ChevronRight, EyeOff, CalendarDays, CalendarCheck } from 'lucide-react';
+import { format, parseISO } from 'date-fns';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger, DialogFooter } from '../components/ui/dialog';
 import { Checkbox } from '../components/ui/checkbox';
 import { Attendance } from './Attendance';
@@ -94,9 +95,38 @@ import { toast } from 'sonner@2.0.3';
 import { Badge } from '../components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 
+function addWorkingDays(from: Date, days: number): Date {
+  let count = 0;
+  const d = new Date(from);
+  while (count < days) {
+    d.setDate(d.getDate() + 1);
+    const dow = d.getDay();
+    if (dow !== 0 && dow !== 6) count++;
+  }
+  return d;
+}
+
+function getHardCopyDeadlineDays(type: string, isPartial: boolean): number | null {
+  if (type === 'Sick') return 5;
+  if (type === 'Casual' || type === 'Annual') return 2;
+  if (type === 'Other' && !isPartial) return 2;
+  return null;
+}
+
+function getWorkingDayPath(from: Date, count: number): Date[] {
+  const days: Date[] = [];
+  const d = new Date(from);
+  while (days.length < count) {
+    d.setDate(d.getDate() + 1);
+    const dow = d.getDay();
+    if (dow !== 0 && dow !== 6) days.push(new Date(d));
+  }
+  return days;
+}
+
 export const Dashboard: React.FC = () => {
   const navigate = useNavigate();
-  const { folders, addFolder, updateFolder, deleteFolder, timesheets, employees, deleteTimesheet, currentUser, templates, signatures, attendanceRecords } = useAppStore();
+  const { folders, addFolder, updateFolder, deleteFolder, timesheets, employees, deleteTimesheet, currentUser, templates, signatures, attendanceRecords, leaves } = useAppStore();
   const [newFolderName, setNewFolderName] = useState('');
   const [isFolderDialogOpen, setIsFolderDialogOpen] = useState(false);
   const [isHideFolderDialogOpen, setIsHideFolderDialogOpen] = useState(false);
@@ -113,6 +143,13 @@ export const Dashboard: React.FC = () => {
   const [timesheetToDelete, setTimesheetToDelete] = useState<string | null>(null);
 
   const isAdmin = currentUser?.role === 'Admin/HR';
+  const isDIC = currentUser?.role === 'Staff' && currentUser?.designation === 'DIC';
+
+  const myLeaves = React.useMemo(() => {
+    if (!currentUser || isAdmin) return [];
+    return [...leaves.filter(l => l.employeeId === currentUser.id && l.status === 'Pending')]
+      .sort((a, b) => (b.createdAt ?? b.startDate).localeCompare(a.createdAt ?? a.startDate));
+  }, [leaves, currentUser, isAdmin]);
 
   const handleCreateFolder = () => {
     if (!isAdmin) return;
@@ -155,20 +192,20 @@ export const Dashboard: React.FC = () => {
 
   // Stats
   const totalEmployees = isAdmin ? employees.length : 1;
-  const totalTimesheets = isAdmin 
-    ? timesheets.length 
+  const totalTimesheets = isAdmin
+    ? timesheets.length
     : timesheets.filter(t => t.employeeId === currentUser?.id).length;
-  const activeEmployees = isAdmin 
-    ? employees.filter(e => e.status === 'Active').length 
+  const activeEmployees = isAdmin
+    ? employees.filter(e => e.status === 'Active').length
     : (currentUser?.status === 'Active' ? 1 : 0);
 
-  const filteredTimesheets = selectedFolderId 
+  const filteredTimesheets = selectedFolderId
     ? timesheets.filter(t => {
         if (t.folderId !== selectedFolderId) return false;
-        // Staff restriction: only see their own
-        if (!isAdmin && currentUser) {
-          return t.employeeId === currentUser.id;
-        }
+        // Admin and DIC Staff see all timesheets
+        if (isAdmin || isDIC) return true;
+        // Regular Staff: only their own
+        if (currentUser) return t.employeeId === currentUser.id;
         return true;
       })
     : [];
@@ -192,6 +229,12 @@ export const Dashboard: React.FC = () => {
 
   const sortedTimesheets = React.useMemo(() => {
     return [...searchedTimesheets].sort((a, b) => {
+      // DIC Staff: own timesheet always first
+      if (isDIC) {
+        const aOwn = a.employeeId === currentUser?.id ? -1 : 1;
+        const bOwn = b.employeeId === currentUser?.id ? -1 : 1;
+        if (aOwn !== bOwn) return aOwn - bOwn;
+      }
       if (sortBy === 'eid') {
         const aNum = parseEidNumber(a.eid || '');
         const bNum = parseEidNumber(b.eid || '');
@@ -288,6 +331,84 @@ export const Dashboard: React.FC = () => {
       {!isAdmin && (
         <div className="mb-4">
           <Attendance dashboardMode={true} />
+        </div>
+      )}
+
+      {/* Staff: My Applied Leaves */}
+      {!isAdmin && myLeaves.length > 0 && (
+        <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '16px 20px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <CalendarCheck style={{ width: '16px', height: '16px', color: '#6366f1' }} />
+              <span style={{ fontSize: '14px', fontWeight: 700, color: '#0f172a' }}>My Pending Leaves</span>
+              <span style={{ fontSize: '11px', color: '#94a3b8', background: '#f1f5f9', padding: '1px 7px', borderRadius: '9999px' }}>{myLeaves.length}</span>
+            </div>
+            <button
+              onClick={() => navigate('/leaves')}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#6366f1', fontWeight: 600, background: 'transparent', border: 'none', cursor: 'pointer', padding: '4px 8px', borderRadius: '6px' }}
+              onMouseEnter={e => (e.currentTarget.style.background = '#f5f3ff')}
+              onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+            >View All <ChevronRight style={{ width: '12px', height: '12px' }} /></button>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            {myLeaves.slice(0, 5).map(leave => {
+              const typeColor = leave.type === 'Sick' ? '#ef4444' : leave.type === 'Casual' ? '#6366f1' : leave.type === 'Annual' ? '#0ea5e9' : leave.type === 'Maternity' ? '#ec4899' : '#8b5cf6';
+              const deadlineDays = getHardCopyDeadlineDays(leave.type, !!leave.partialHours);
+              const appliedDate = leave.createdAt ? new Date(leave.createdAt) : new Date(leave.startDate);
+              const workingDays = deadlineDays ? getWorkingDayPath(appliedDate, deadlineDays) : [];
+              const todayMid = new Date(); todayMid.setHours(0, 0, 0, 0);
+              const deadline = workingDays.length > 0 ? workingDays[workingDays.length - 1] : null;
+              const deadlineNorm = deadline ? new Date(deadline) : null;
+              if (deadlineNorm) deadlineNorm.setHours(0, 0, 0, 0);
+              const isOverdue = deadlineNorm ? deadlineNorm < todayMid : false;
+              return (
+                <div key={leave.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 12px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #f1f5f9', flexWrap: 'wrap' }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', background: `${typeColor}18`, color: typeColor, fontSize: '9px', fontWeight: 700, padding: '2px 7px', borderRadius: '4px', border: `1px solid ${typeColor}25`, whiteSpace: 'nowrap', flexShrink: 0 }}>{leave.type}</span>
+                  <span style={{ fontSize: '12px', color: '#374151', fontWeight: 500, whiteSpace: 'nowrap', flexShrink: 0 }}>
+                    {format(parseISO(leave.startDate), 'MMM dd')}
+                    {leave.startDate !== leave.endDate ? ` – ${format(parseISO(leave.endDate), 'MMM dd, yyyy')}` : `, ${format(parseISO(leave.startDate), 'yyyy')}`}
+                  </span>
+                  <span style={{ fontSize: '11px', color: '#64748b', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontStyle: 'italic', minWidth: '60px' }}>"{leave.reason}"</span>
+                  {/* Deadline circles */}
+                  {workingDays.length > 0 && (
+                    <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+                      {workingDays.map((d, i, arr) => {
+                        const isDeadlineDay = i === arr.length - 1;
+                        const dNorm = new Date(d); dNorm.setHours(0, 0, 0, 0);
+                        const isPastDay = dNorm < todayMid;
+                        const isTodayDay = dNorm.getTime() === todayMid.getTime();
+                        let bg = '#fff', border = '#e2e8f0', col = '#94a3b8', fw: number = 500;
+                        if (isDeadlineDay) { bg = isOverdue ? '#ef4444' : '#f59e0b'; border = bg; col = '#fff'; fw = 700; }
+                        else if (isPastDay) { bg = '#f1f5f9'; border = '#e2e8f0'; col = '#cbd5e1'; }
+                        else if (isTodayDay) { border = '#3b82f6'; col = '#1d4ed8'; fw = 700; }
+                        return (
+                          <React.Fragment key={i}>
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1px' }}>
+                              <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: bg, border: `2px solid ${border}`, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', lineHeight: 1 }}>
+                                <span style={{ fontSize: '6px', color: col, fontWeight: 600, textTransform: 'uppercase' }}>{format(d, 'MMM')}</span>
+                                <span style={{ fontSize: '11px', color: col, fontWeight: fw }}>{format(d, 'd')}</span>
+                              </div>
+                              <span style={{ fontSize: '6px', color: isDeadlineDay ? (isOverdue ? '#ef4444' : '#f59e0b') : 'transparent', fontWeight: 700, lineHeight: 1 }}>Deadline</span>
+                            </div>
+                            {i < arr.length - 1 && <div style={{ width: '8px', height: '2px', background: '#e2e8f0', marginBottom: '8px', flexShrink: 0 }} />}
+                          </React.Fragment>
+                        );
+                      })}
+                    </div>
+                  )}
+                  <span style={{ display: 'inline-flex', alignItems: 'center', background: '#f59e0b', color: '#fff', fontSize: '9px', fontWeight: 700, padding: '2px 8px', borderRadius: '9999px', flexShrink: 0 }}>Pending</span>
+                </div>
+              );
+            })}
+            {myLeaves.length > 5 && (
+              <button
+                onClick={() => navigate('/leaves')}
+                style={{ fontSize: '11px', color: '#94a3b8', textAlign: 'center', padding: '6px', background: 'transparent', border: 'none', cursor: 'pointer', borderRadius: '6px' }}
+                onMouseEnter={e => (e.currentTarget.style.color = '#6366f1')}
+                onMouseLeave={e => (e.currentTarget.style.color = '#94a3b8')}
+              >+{myLeaves.length - 5} more — view all</button>
+            )}
+          </div>
         </div>
       )}
 
@@ -502,13 +623,16 @@ export const Dashboard: React.FC = () => {
                     e => e.signatureId && e.signedAt && new Date(e.signedAt).toDateString() === todayStr
                   );
 
+                  const isOwnCard = ts.employeeId === currentUser?.id;
                   return (
                     <div
                       key={ts.id}
-                      className={`flex items-center justify-between p-4 border rounded-lg bg-white hover:shadow-sm transition-all duration-300 ${
+                      className={`flex items-center justify-between p-4 border rounded-lg hover:shadow-sm transition-all duration-300 ${
                         signedToday
-                          ? 'border-green-400 shadow-[0_0_0_2px_rgba(34,197,94,0.25),0_0_16px_4px_rgba(34,197,94,0.18)] animate-pulse-green'
-                          : ''
+                          ? 'bg-white border-green-400 shadow-[0_0_0_2px_rgba(34,197,94,0.25),0_0_16px_4px_rgba(34,197,94,0.18)] animate-pulse-green'
+                          : isOwnCard && isDIC
+                          ? 'bg-blue-50 border-blue-400'
+                          : 'bg-white'
                       }`}
                       style={signedToday ? {
                         boxShadow: '0 0 0 2px rgba(34,197,94,0.35), 0 0 18px 4px rgba(34,197,94,0.22)',
@@ -516,12 +640,17 @@ export const Dashboard: React.FC = () => {
                       } : {}}
                     >
                       <div className="flex items-center gap-4">
-                        <div className={`h-10 w-10 rounded-full flex items-center justify-center font-bold text-xs ${signedToday ? 'bg-green-100 text-green-700 ring-2 ring-green-400' : 'bg-blue-100 text-blue-700'}`}>
+                        <div className={`h-10 w-10 rounded-full flex items-center justify-center font-bold text-xs ${signedToday ? 'bg-green-100 text-green-700 ring-2 ring-green-400' : isOwnCard && isDIC ? 'bg-blue-200 text-blue-800 ring-2 ring-blue-400' : 'bg-blue-100 text-blue-700'}`}>
                           {ts.eid}
                         </div>
                         <div>
                           <div className="flex items-center gap-2">
                             <h4 className="font-bold text-sm">{employees.find(e => e.id === ts.employeeId)?.name || ts.employeeName}</h4>
+                            {isOwnCard && isDIC && !signedToday && (
+                              <span className="inline-flex items-center text-[10px] font-semibold text-blue-700 bg-blue-100 border border-blue-300 rounded-full px-2 py-0.5">
+                                My Timesheet
+                              </span>
+                            )}
                             {signedToday && (
                               <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-green-700 bg-green-50 border border-green-200 rounded-full px-2 py-0.5">
                                 <svg className="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
