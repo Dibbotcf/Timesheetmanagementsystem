@@ -1,6 +1,6 @@
 const mysql = require('mysql2/promise');
 const localDb = require('./local_db');
-require('dotenv').config();
+require('dotenv').config({ path: require('path').join(__dirname, '.env') });
 
 const USE_MYSQL = process.env.USE_MYSQL === 'true';
 

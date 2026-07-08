@@ -1,7 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const { get, set, del, getByPrefix } = require('./db');
-require('dotenv').config();
+require('dotenv').config({ path: require('path').join(__dirname, '.env') });
 
 const http = require('http');
 const { Server } = require('socket.io');

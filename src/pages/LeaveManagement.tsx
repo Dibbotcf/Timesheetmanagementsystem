@@ -35,6 +35,30 @@ function getHardCopyDeadlineDays(type: LeaveType, isPartial: boolean): number | 
   return null; // Maternity or partial Other — not applicable
 }
 
+function countLeaveDays(startStr: string, endStr: string, templates: import('../App').MonthTemplate[]): { working: number; skipped: number; skippedReasons: string[] } {
+  const start = new Date(startStr + 'T00:00:00');
+  const end = new Date(endStr + 'T00:00:00');
+  let working = 0;
+  let skipped = 0;
+  const skippedReasons: string[] = [];
+  const cur = new Date(start);
+  while (cur <= end) {
+    const y = cur.getFullYear();
+    const m = cur.getMonth(); // 0-indexed
+    const d = cur.getDate();
+    const tpl = templates.find(t => t.year === y && t.month === m);
+    const holiday = tpl?.holidays.find(h => h.date === d);
+    if (holiday) {
+      skipped++;
+      if (!skippedReasons.includes(holiday.reason)) skippedReasons.push(holiday.reason);
+    } else {
+      working++;
+    }
+    cur.setDate(cur.getDate() + 1);
+  }
+  return { working, skipped, skippedReasons };
+}
+
 function getWorkingDayPath(from: Date, count: number): Date[] {
   const days: Date[] = [];
   const d = new Date(from);
@@ -56,7 +80,7 @@ const LEAVE_LIMITS = {
 };
 
 export const LeaveManagement: React.FC = () => {
-  const { employees, leaves, addLeave, updateLeave, deleteLeave, updateEmployee, deleteEmployee, currentUser, leaveFolders, addLeaveFolder, deleteLeaveFolder, savedLeaveReports, addSavedLeaveReport, deleteSavedLeaveReport, getItem } = useAppStore();
+  const { employees, leaves, addLeave, updateLeave, deleteLeave, updateEmployee, deleteEmployee, currentUser, leaveFolders, addLeaveFolder, deleteLeaveFolder, savedLeaveReports, addSavedLeaveReport, deleteSavedLeaveReport, getItem, templates } = useAppStore();
   
   const isStaff = currentUser?.role === 'Staff';
   const isDIC = isStaff && currentUser?.designation === 'DIC';
@@ -295,11 +319,18 @@ export const LeaveManagement: React.FC = () => {
         }
         const start = parseISO(startDate);
         const end = parseISO(endDate);
-        days = differenceInDays(end, start) + 1;
-
-        if (days <= 0) {
+        if (differenceInDays(end, start) < 0) {
             toast.error("End date must be after start date");
             return;
+        }
+        const { working, skipped, skippedReasons } = countLeaveDays(startDate, endDate, templates);
+        days = working;
+        if (days <= 0) {
+            toast.error("No working days in selected range — all selected dates are off-days");
+            return;
+        }
+        if (skipped > 0) {
+            toast.info(`${skipped} off-day${skipped > 1 ? 's' : ''} excluded (${skippedReasons.join(', ')}). Counting ${days} working day${days > 1 ? 's' : ''}.`);
         }
     }
 
@@ -1113,11 +1144,25 @@ export const LeaveManagement: React.FC = () => {
                                                 onChange={e => setReason(e.target.value)}
                                             />
                                         </div>
-                                        {durationMode === 'full' && startDate && endDate && (
-                                            <div className="p-3 bg-gray-50 rounded text-sm text-center">
-                                                Calculated Duration: <span className="font-bold">{Math.max(0, differenceInDays(parseISO(endDate), parseISO(startDate)) + 1)} Days</span>
-                                            </div>
-                                        )}
+                                        {durationMode === 'full' && startDate && endDate && (() => {
+                                            const preview = countLeaveDays(startDate, endDate, templates);
+                                            const calDays = differenceInDays(parseISO(endDate), parseISO(startDate)) + 1;
+                                            if (calDays <= 0) return null;
+                                            return (
+                                                <div style={{ padding: '10px 14px', background: preview.working === 0 ? '#fef2f2' : '#f0fdf4', borderRadius: '8px', border: `1px solid ${preview.working === 0 ? '#fecaca' : '#bbf7d0'}` }}>
+                                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                                                        <span style={{ fontSize: '13px', color: '#374151' }}>
+                                                            <span style={{ fontWeight: 700, fontSize: '16px', color: preview.working === 0 ? '#dc2626' : '#15803d' }}>{preview.working}</span> working day{preview.working !== 1 ? 's' : ''} will be deducted
+                                                        </span>
+                                                        {preview.skipped > 0 && (
+                                                            <span style={{ fontSize: '11px', color: '#6b7280', background: '#f3f4f6', padding: '2px 8px', borderRadius: '9999px', border: '1px solid #e5e7eb' }}>
+                                                                {preview.skipped} off-day{preview.skipped > 1 ? 's' : ''} skipped: {preview.skippedReasons.join(', ')}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })()}
                                     </div>
                                 <DialogFooter>
                                     <Button onClick={handleSubmitLeave}>Confirm & Save</Button>
@@ -1708,6 +1753,13 @@ export const LeaveManagement: React.FC = () => {
                                                         onMouseLeave={e => (e.currentTarget.style.background = '#16a34a')}
                                                     ><Check className="h-3 w-3" /> Approve</button>
                                                 </>
+                                            ) : !needsHardCopy ? (
+                                                <button
+                                                    onClick={() => { updateLeave(leave.id, { status: 'Approved' }); toast.success(`Leave approved for ${emp?.name}`); }}
+                                                    style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: '#16a34a', color: '#fff', fontSize: '11px', fontWeight: 600, padding: '5px 12px', borderRadius: '9999px', border: 'none', cursor: 'pointer' }}
+                                                    onMouseEnter={e => (e.currentTarget.style.background = '#15803d')}
+                                                    onMouseLeave={e => (e.currentTarget.style.background = '#16a34a')}
+                                                ><Check className="h-3 w-3" /> Approve</button>
                                             ) : (
                                                 <button
                                                     style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: '#f1f5f9', color: '#94a3b8', fontSize: '11px', fontWeight: 600, padding: '5px 12px', borderRadius: '9999px', border: 'none', cursor: 'not-allowed', opacity: 0.45 }}
