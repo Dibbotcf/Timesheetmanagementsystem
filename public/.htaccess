@@ -5,6 +5,8 @@
   # Pass API requests through to the PHP backend — do not rewrite to index.html
   RewriteCond %{REQUEST_URI} ^/api/ [NC]
   RewriteRule ^ - [L]
+  # Route ZKTeco device ADMS push (/iclock/*) to PHP backend
+  RewriteRule ^iclock/(.*)$ api/index.php [QSA,L]
   RewriteCond %{REQUEST_FILENAME} !-f
   RewriteCond %{REQUEST_FILENAME} !-d
   RewriteRule . /index.html [L]

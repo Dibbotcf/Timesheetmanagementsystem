@@ -23,6 +23,80 @@ $uri = strtok($uri, '?');
 // If using built-in server at root: /api/auth/login
 // We need to handle the base path.
 
+// ── ZKTeco ADMS Device Push (/iclock/*) ─────────────────────────────────────
+// The ZKT device calls these endpoints directly to push attendance in real-time.
+// No port forwarding needed — device makes outbound HTTP to this server.
+if (strpos($uri, '/iclock/') !== false) {
+    $iaction = ltrim(substr($uri, strpos($uri, '/iclock/') + 7), '/'); // "cdata","getrequest","devicecmd"
+    $sn      = $_GET['SN'] ?? 'device';
+    $table   = $_GET['table'] ?? '';
+    $pushedFile = __DIR__ . '/zkt_pushed_attendance.json';
+
+    header('Content-Type: text/plain');
+
+    // ── GET /iclock/cdata — device handshake ───────────────────────────────
+    if ($iaction === 'cdata' && $method === 'GET') {
+        echo "OK\n";
+        echo "GET OPTION FROM: {$sn}\n";
+        echo "ATTLOGStamp=9999\n";
+        echo "OPERLOGStamp=9999\n";
+        echo "ErrorDelay=30\n";
+        echo "Delay=10\n";
+        echo "TransTimes=00:00;14:05\n";
+        echo "TransInterval=1\n";
+        echo "TransFlag=TransData AttLog\n";
+        echo "TimeZone=6\n";
+        echo "Realtime=1\n";
+        echo "Encrypt=None\n";
+        exit;
+    }
+
+    // ── POST /iclock/cdata?table=ATTLOG — device pushes attendance ─────────
+    if ($iaction === 'cdata' && $method === 'POST' && $table === 'ATTLOG') {
+        $body = file_get_contents('php://input');
+
+        // Load existing records keyed by "userId|recordTime" for deduplication
+        $existing = [];
+        if (file_exists($pushedFile)) {
+            $saved = json_decode(file_get_contents($pushedFile), true);
+            if (is_array($saved)) {
+                foreach ($saved as $rec) {
+                    $k = ($rec['deviceUserId'] ?? '') . '|' . ($rec['recordTime'] ?? '');
+                    $existing[$k] = $rec;
+                }
+            }
+        }
+
+        // Parse tab-separated records: PIN \t Verify \t DateTime \t Status ...
+        $added = 0;
+        foreach (explode("\n", trim($body)) as $line) {
+            $line = trim($line);
+            if (!$line) continue;
+            $f = explode("\t", $line);
+            if (count($f) < 3) continue;
+            $userId   = trim($f[0]);
+            $dateTime = trim($f[2]); // "2024-07-12 08:30:00"
+            if (!$userId || !$dateTime) continue;
+            $iso = str_replace(' ', 'T', $dateTime); // "2024-07-12T08:30:00"
+            $k   = "{$userId}|{$iso}";
+            if (!isset($existing[$k])) {
+                $existing[$k] = ['deviceUserId' => $userId, 'recordTime' => $iso];
+                $added++;
+            }
+        }
+
+        file_put_contents($pushedFile, json_encode(array_values($existing)));
+        echo "OK: {$added}\n";
+        exit;
+    }
+
+    // ── GET /iclock/getrequest — device polls for commands ─────────────────
+    // ── POST /iclock/devicecmd — device sends command result ───────────────
+    // ── Any other iclock path ───────────────────────────────────────────────
+    echo "OK\n";
+    exit;
+}
+
 // Extract path after /api/
 if (strpos($uri, '/api/') !== false) {
     $path = substr($uri, strpos($uri, '/api/') + 5);
@@ -504,24 +578,23 @@ if ($parts[0] === 'zkt') {
 
     if ($action === 'attendance') {
         if ($method === 'GET') {
+            $pushedFile = __DIR__ . '/zkt_pushed_attendance.json';
             try {
+                // Try direct device connection (works on local network)
                 $zk = $getZk();
                 $records = $zk->getAttendances();
                 $zk->disconnect();
-
-                // Sort newest first
-                usort($records, function($a, $b) {
-                    return strcmp($b['recordTime'], $a['recordTime']);
-                });
-
-                echo json_encode([
-                    'success' => true,
-                    'total' => count($records),
-                    'records' => $records
-                ]);
+                usort($records, fn($a, $b) => strcmp($b['recordTime'], $a['recordTime']));
+                echo json_encode(['success' => true, 'total' => count($records), 'records' => $records, 'source' => 'device']);
             } catch (Exception $e) {
-                http_response_code(500);
-                echo json_encode(['success' => false, 'error' => $e->getMessage()]);
+                // Fallback: use data pushed by the device via ADMS
+                if (file_exists($pushedFile)) {
+                    $records = json_decode(file_get_contents($pushedFile), true) ?: [];
+                    usort($records, fn($a, $b) => strcmp($b['recordTime'], $a['recordTime']));
+                    echo json_encode(['success' => true, 'total' => count($records), 'records' => $records, 'source' => 'push']);
+                } else {
+                    echo json_encode(['success' => false, 'records' => [], 'total' => 0, 'error' => $e->getMessage()]);
+                }
             }
             exit;
         }
