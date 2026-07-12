@@ -44,7 +44,7 @@ if (strpos($uri, '/iclock/') !== false) {
         echo "Delay=10\n";
         echo "TransTimes=00:00;14:05\n";
         echo "TransInterval=1\n";
-        echo "TransFlag=TransData AttLog\n";
+        echo "TransFlag=TransData AttLog UserInfo EnrollUser\n";
         echo "TimeZone=6\n";
         echo "Realtime=1\n";
         echo "Encrypt=None\n";
@@ -87,6 +87,38 @@ if (strpos($uri, '/iclock/') !== false) {
 
         file_put_contents($pushedFile, json_encode(array_values($existing)));
         echo "OK: {$added}\n";
+        exit;
+    }
+
+    // ── POST /iclock/cdata?table=USERINFO — device pushes user list ───────
+    if ($iaction === 'cdata' && $method === 'POST' && $table === 'USERINFO') {
+        $body = file_get_contents('php://input');
+        $pushedUsersFile = __DIR__ . '/zkt_pushed_users.json';
+
+        $existing = [];
+        if (file_exists($pushedUsersFile)) {
+            $saved = json_decode(file_get_contents($pushedUsersFile), true);
+            if (is_array($saved)) {
+                foreach ($saved as $u) {
+                    $existing[$u['userId'] ?? ''] = $u;
+                }
+            }
+        }
+
+        // USERINFO format: PIN \t Password \t Name \t Pri \t Verify \t Group ...
+        foreach (explode("\n", trim($body)) as $line) {
+            $line = trim($line);
+            if (!$line) continue;
+            $f = explode("\t", $line);
+            if (count($f) < 1) continue;
+            $userId = trim($f[0]);
+            $name   = isset($f[2]) ? trim($f[2]) : '';
+            if (!$userId) continue;
+            $existing[$userId] = ['userId' => $userId, 'name' => $name, 'uid' => intval($userId), 'role' => 0, 'password' => '', 'cardno' => 0];
+        }
+
+        file_put_contents($pushedUsersFile, json_encode(array_values($existing)));
+        echo "OK: " . count($existing) . "\n";
         exit;
     }
 
@@ -602,14 +634,21 @@ if ($parts[0] === 'zkt') {
 
     if ($action === 'users') {
         if ($method === 'GET') {
+            $pushedUsersFile = __DIR__ . '/zkt_pushed_users.json';
             try {
                 $zk = $getZk();
                 $users = $zk->getUsers();
                 $zk->disconnect();
-                echo json_encode(['success' => true, 'users' => $users]);
+                echo json_encode(['success' => true, 'users' => $users, 'source' => 'device']);
             } catch (Exception $e) {
-                http_response_code(500);
-                echo json_encode(['success' => false, 'error' => $e->getMessage()]);
+                // Fallback: use user list pushed by device via ADMS USERINFO
+                if (file_exists($pushedUsersFile)) {
+                    $users = json_decode(file_get_contents($pushedUsersFile), true) ?: [];
+                    echo json_encode(['success' => true, 'users' => $users, 'source' => 'push']);
+                } else {
+                    // Return empty list gracefully — never 500
+                    echo json_encode(['success' => true, 'users' => [], 'source' => 'none', 'error' => $e->getMessage()]);
+                }
             }
             exit;
         }

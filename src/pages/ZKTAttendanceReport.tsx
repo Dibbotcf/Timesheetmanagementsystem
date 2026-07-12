@@ -197,11 +197,10 @@ export const ZKTAttendanceReport: React.FC<{ onBack: () => void }> = ({ onBack }
       const statusData: DeviceStatus = await statusRes.json();
       setStatus(statusData);
       if (!statusData.connected) {
-        toast.error(`Device unreachable: ${statusData.error || 'Connection failed'}`);
-        return;
+        toast.warning('Device offline — loading from cached push data…');
       }
       const attData   = await attRes.json();
-      const usersData = await usersRes.json();
+      const usersData = usersRes.ok ? await usersRes.json() : { users: [] };
       let ovData: Record<string, { entry: string; out: string }> = {};
       try { if (ovRes.ok) ovData = await ovRes.json(); } catch {}
       const rawUsers: ZKTUser[] = usersData.users || [];
@@ -210,7 +209,8 @@ export const ZKTAttendanceReport: React.FC<{ onBack: () => void }> = ({ onBack }
       setUsers(rawUsers);
       setTotalRaw(attData.total || 0);
       setFetched(true);
-      toast.success(`Loaded ${rawUsers.length} users · ${(attData.total || 0).toLocaleString()} punches`);
+      const src = attData.source === 'push' ? ' (push cache)' : '';
+      toast.success(`Loaded ${rawUsers.length} users · ${(attData.total || 0).toLocaleString()} punches${src}`);
     } catch (err: any) {
       toast.error(`Failed: ${err.message}`);
     } finally {
