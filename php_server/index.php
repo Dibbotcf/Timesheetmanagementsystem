@@ -713,6 +713,32 @@ if ($parts[0] === 'zkt') {
         }
     }
 
+    if ($action === 'adms-status') {
+        $pushedFile = __DIR__ . '/zkt_pushed_attendance.json';
+        $usersFile  = __DIR__ . '/zkt_pushed_users.json';
+        $attRecords = 0; $attLatest = null;
+        if (file_exists($pushedFile)) {
+            $recs = json_decode(file_get_contents($pushedFile), true) ?: [];
+            $attRecords = count($recs);
+            if ($attRecords > 0) {
+                usort($recs, fn($a,$b) => strcmp($b['recordTime'],$a['recordTime']));
+                $attLatest = $recs[0]['recordTime'] ?? null;
+            }
+        }
+        $userCount = 0;
+        if (file_exists($usersFile)) {
+            $userCount = count(json_decode(file_get_contents($usersFile), true) ?: []);
+        }
+        echo json_encode([
+            'adms_attendance_records' => $attRecords,
+            'adms_latest_record'      => $attLatest,
+            'adms_user_count'         => $userCount,
+            'pushed_att_file_exists'  => file_exists($pushedFile),
+            'pushed_users_file_exists'=> file_exists($usersFile),
+        ]);
+        exit;
+    }
+
     if ($action === 'time-overrides') {
         $readOverrides = function() use ($overridesFile) {
             if (file_exists($overridesFile)) {
