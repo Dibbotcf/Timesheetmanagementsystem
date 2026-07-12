@@ -46,15 +46,3 @@ jobs:
         password: ${{ secrets.FTP_PASSWORD }}
         server-dir: hrm.tcfbd.com/
         local-dir: ./deployment/
-
-    - name: Deploy ZKT iclock proxy to primary domain
-      run: |
-        curl -s --ftp-create-dirs \
-          -T primary_domain/iclock/proxy.php \
-          "ftp://${{ secrets.FTP_SERVER }}/public_html/iclock/proxy.php" \
-          --user "${{ secrets.FTP_USERNAME }}:${{ secrets.FTP_PASSWORD }}"
-        curl -s --ftp-create-dirs \
-          -T primary_domain/iclock/.htaccess \
-          "ftp://${{ secrets.FTP_SERVER }}/public_html/iclock/.htaccess" \
-          --user "${{ secrets.FTP_USERNAME }}:${{ secrets.FTP_PASSWORD }}"
-        echo "ZKT proxy deployed to public_html/iclock/"
