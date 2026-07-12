@@ -77,7 +77,7 @@ if ($parts[0] === 'auth' && $parts[1] === 'login' && $method === 'POST') {
             'id' => 'sys-admin-temp',
             'name' => 'Superadmin',
             'eid' => 'SYS001',
-            'role' => 'Admin/HR',
+            'role' => 'Superadmin',
             'status' => 'Active',
             'dob' => date('c'),
             'joiningDate' => date('c')
