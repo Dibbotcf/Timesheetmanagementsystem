@@ -713,6 +713,44 @@ if ($parts[0] === 'zkt') {
         }
     }
 
+    // ── POST /api/zkt/sync — bulk upload from local office server ─────────────
+    // Called by server/sync-to-live.js on the office PC to push all device data
+    if ($action === 'sync' && $method === 'POST') {
+        $body = json_decode(file_get_contents('php://input'), true);
+        if (!$body) { http_response_code(400); echo json_encode(['error' => 'Invalid JSON']); exit; }
+
+        $pushedFile     = __DIR__ . '/zkt_pushed_attendance.json';
+        $pushedUsersFile= __DIR__ . '/zkt_pushed_users.json';
+
+        $attAdded = 0; $usersAdded = 0;
+
+        // Merge attendance records
+        if (!empty($body['records']) && is_array($body['records'])) {
+            $existing = [];
+            if (file_exists($pushedFile)) {
+                $saved = json_decode(file_get_contents($pushedFile), true) ?: [];
+                foreach ($saved as $rec) {
+                    $k = ($rec['deviceUserId'] ?? '') . '|' . ($rec['recordTime'] ?? '');
+                    $existing[$k] = $rec;
+                }
+            }
+            foreach ($body['records'] as $rec) {
+                $k = ($rec['deviceUserId'] ?? '') . '|' . ($rec['recordTime'] ?? '');
+                if (!isset($existing[$k])) { $existing[$k] = $rec; $attAdded++; }
+            }
+            file_put_contents($pushedFile, json_encode(array_values($existing)));
+        }
+
+        // Overwrite users (fresher list always wins)
+        if (!empty($body['users']) && is_array($body['users'])) {
+            file_put_contents($pushedUsersFile, json_encode($body['users']));
+            $usersAdded = count($body['users']);
+        }
+
+        echo json_encode(['success' => true, 'att_added' => $attAdded, 'users_saved' => $usersAdded]);
+        exit;
+    }
+
     if ($action === 'adms-status') {
         $pushedFile = __DIR__ . '/zkt_pushed_attendance.json';
         $usersFile  = __DIR__ . '/zkt_pushed_users.json';
