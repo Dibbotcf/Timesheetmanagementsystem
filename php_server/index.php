@@ -32,6 +32,12 @@ if (strpos($uri, '/iclock/') !== false) {
     $table   = $_GET['table'] ?? '';
     $pushedFile = __DIR__ . '/zkt_pushed_attendance.json';
 
+    // Record every device contact so /api/zkt/adms-status can prove connectivity
+    @file_put_contents(__DIR__ . '/zkt_device_lastseen.json', json_encode([
+        'sn' => $sn, 'action' => $iaction, 'method' => $method,
+        'time' => date('c'),
+    ]));
+
     header('Content-Type: text/plain');
 
     // ── GET /iclock/cdata — device handshake ───────────────────────────────
@@ -767,12 +773,18 @@ if ($parts[0] === 'zkt') {
         if (file_exists($usersFile)) {
             $userCount = count(json_decode(file_get_contents($usersFile), true) ?: []);
         }
+        $lastSeen = null;
+        $lastSeenFile = __DIR__ . '/zkt_device_lastseen.json';
+        if (file_exists($lastSeenFile)) {
+            $lastSeen = json_decode(file_get_contents($lastSeenFile), true);
+        }
         echo json_encode([
             'adms_attendance_records' => $attRecords,
             'adms_latest_record'      => $attLatest,
             'adms_user_count'         => $userCount,
             'pushed_att_file_exists'  => file_exists($pushedFile),
             'pushed_users_file_exists'=> file_exists($usersFile),
+            'device_last_seen'        => $lastSeen,
         ]);
         exit;
     }
