@@ -459,10 +459,22 @@ const ZKT_TIMEOUT = 10000;
 const ZKT_CONFIG_FILE = path.join(__dirname, 'zkt-device-config.json');
 
 function readZKTConfig() {
+    // Environment variables ALWAYS take priority (used in production/cPanel).
+    // The JSON config file is only used as a fallback for local dev
+    // when env vars are not set.
+    if (process.env.ZKT_IP) {
+        return {
+            ip:        process.env.ZKT_IP.trim(),
+            port:      parseInt(process.env.ZKT_PORT || '4370', 10),
+            machineNo: parseInt(process.env.ZKT_MACHINE_NO || '102', 10),
+        };
+    }
+    // Local dev fallback: read from saved JSON config file
     try { return JSON.parse(fs.readFileSync(ZKT_CONFIG_FILE, 'utf8')); } catch {}
+    // Hard fallback defaults
     return {
-        ip:        process.env.ZKT_IP   || '192.168.68.40',
-        port:      parseInt(process.env.ZKT_PORT || '4370', 10),
+        ip:        '192.168.68.40',
+        port:      4370,
         machineNo: 102,
     };
 }

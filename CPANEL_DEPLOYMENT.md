@@ -97,13 +97,26 @@ Before you begin, ensure you have:
 ### Step 5: Configure Environment Variables
 1.  In the **Setup Node.js App** screen, look for **Environment Variables**.
 2.  Click **Add Variable** for each of the following:
+
+    **Database:**
+    -   **Name:** `USE_MYSQL` | **Value:** `true`
     -   **Name:** `DB_HOST` | **Value:** `localhost`
     -   **Name:** `DB_USER` | **Value:** (The database user you created in Phase 1)
     -   **Name:** `DB_PASSWORD` | **Value:** (The password you saved in Phase 1)
     -   **Name:** `DB_NAME` | **Value:** (The database name from Phase 1)
     -   **Name:** `PORT` | **Value:** `3001` (Or let cPanel manage it, but defining it is safer)
+
+    **ZKTeco Biometric Device (Port Forward setup):**
+    -   **Name:** `ZKT_IP` | **Value:** `<your-office-static-public-IP>` *(e.g. `203.0.113.45`)*
+    -   **Name:** `ZKT_PORT` | **Value:** `4370`
+    -   **Name:** `ZKT_MACHINE_NO` | **Value:** `102` *(adjust if different)*
+
+    > ⚠️ `ZKT_IP` must be the **public IP of your office router**, not the device's private IP (`192.168.x.x`).
+    > The router must be configured to **port-forward 4370 → 192.168.80.40:4370** (see router setup below).
+
 3.  Click **Save**.
 4.  **Restart the Application** (Click "Restart" button).
+
 
 ---
 
@@ -176,6 +189,59 @@ Since this is a Single Page App, we need to redirect all traffic to `index.html`
     -   **Passkey:** `Superadmin@tcfadmin`
     -   *Note: This login is now hardcoded to ALWAYS work as a recovery key, even if other admins exist.*
 
+---
+
+## Phase 5: ZKTeco Device Connectivity (Port Forward Setup)
+
+The ZKTeco biometric device is on your **office LAN** (`192.168.80.40`).
+The live server (`hrm.tcfbd.com`) is on the public internet.
+To bridge them, you must **port-forward** the device's port through your office router.
+
+### Step 1: Log Into Your Office Router
+1.  Open a browser on any office PC.
+2.  Navigate to your router's admin page (usually `192.168.1.1` or `192.168.0.1`).
+3.  Log in with your router admin credentials.
+
+### Step 2: Add a Port Forward Rule
+Find **"Port Forwarding"**, **"Virtual Server"**, or **"NAT"** in the router menu (name varies by brand).
+
+Add a new rule:
+
+| Field | Value |
+|-------|-------|
+| **Name / Description** | `ZKTeco` |
+| **Protocol** | `TCP` (or `TCP/UDP`) |
+| **External Port** | `4370` |
+| **Internal IP** | `192.168.80.40` *(ZKTeco device LAN IP)* |
+| **Internal Port** | `4370` |
+| **Status** | Enabled |
+
+Save and apply the rule.
+
+### Step 3: Find Your Office Public IP
+On any office PC, go to: [https://whatismyip.com](https://whatismyip.com)
+
+Note the IP address shown (e.g., `203.0.113.45`). This is your **office public IP**.
+
+> ⚠️ If this IP changes (dynamic IP), you'll need to update `ZKT_IP` in cPanel every time it changes.
+> Consider setting up **DDNS** (e.g., No-IP, DuckDNS) to get a stable hostname instead.
+
+### Step 4: Set `ZKT_IP` in cPanel
+1.  Log in to **cPanel → Setup Node.js App**.
+2.  Click **Edit** on your application.
+3.  Under **Environment Variables**, add or update:
+    -   `ZKT_IP` = `203.0.113.45` *(your actual public IP)*
+    -   `ZKT_PORT` = `4370`
+    -   `ZKT_MACHINE_NO` = `102`
+4.  Click **Save** → **Restart**.
+
+### Step 5: Test the Connection
+1.  Open `https://hrm.tcfbd.com/reports`.
+2.  Click **"Load from Device"**.
+3.  Expected result: ✅ **"Device Connected"** green badge appears.
+
+---
+
 ## Troubleshooting
 -   **"index.js not found"**: Check your specific Node.js App Root folder in File Manager. It must contain `index.js` and `package.json`.
 -   **"Run NPM Install" Disabled/Greyed Out**: This means `package.json` is not found in the **Application Root**.
@@ -184,3 +250,9 @@ Since this is a Single Page App, we need to redirect all traffic to `index.html`
 -   **White Screen on Frontend**: Check console errors (F12). If you see 404s for JS/CSS files, make sure you uploaded the *contents* of `dist`, not the folder `dist` itself.
 -   **"dist" folder missing after build**: Check `vite.config.ts`. If `outDir` is set to `'build'`, look for a `build` folder instead.
 -   **API Errors**: specific "Network Error" usually means `VITE_API_URL` is wrong or the Backend is not running. Check cPanel "Setup Node.js App" status.
+-   **ZKTeco "Device Unreachable"**: Check the following in order:
+    1.  Is `ZKT_IP` set in cPanel env vars to the **public IP** (not `192.168.x.x`)?
+    2.  Is the port forward rule **enabled** on the office router?
+    3.  Is the ZKTeco device **powered on** and connected to LAN?
+    4.  Is port `4370` blocked by the office ISP or firewall? (Test with `telnet <public-ip> 4370` from outside the office network.)
+    5.  Did the office public IP **change**? Check `whatismyip.com` from office and update `ZKT_IP` in cPanel.
