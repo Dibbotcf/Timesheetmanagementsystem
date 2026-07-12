@@ -1,0 +1,6 @@
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /iclock/
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteRule ^(.*)$ proxy.php [QSA,L]
+</IfModule>
