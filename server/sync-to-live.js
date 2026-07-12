@@ -63,10 +63,22 @@ async function main() {
     await zk.disconnect();
     console.log('Disconnected from device.\n');
 
-    // Map to the same format the PHP backend expects
+    // Map to the same format the PHP backend expects.
+    // node-zklib returns recordTime as a Date — format as device-local
+    // "YYYY-MM-DDTHH:mm:ss" to match what ADMS push writes (no Z, no ms).
+    const p = n => String(n).padStart(2, '0');
+    const fmtLocal = d =>
+        `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+    const toIso = v => {
+        if (v instanceof Date) return fmtLocal(v);
+        const s = String(v ?? '').trim();
+        if (!s) return '';
+        const d = new Date(s);
+        return isNaN(d) ? s.replace(' ', 'T') : fmtLocal(d);
+    };
     const records = logs.map(r => ({
         deviceUserId: String(r.deviceUserId ?? r.user_id ?? ''),
-        recordTime:   (r.recordTime ?? r.record_time ?? '').replace(' ', 'T'),
+        recordTime:   toIso(r.recordTime ?? r.record_time),
     })).filter(r => r.deviceUserId && r.recordTime);
 
     const userList = users.map(u => ({
