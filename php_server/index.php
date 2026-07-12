@@ -417,6 +417,224 @@ if ($parts[0] === 'upload-pdf' && $method === 'POST') {
     exit;
 }
 
+if ($parts[0] === 'zkt') {
+    require_once 'zkteco.php';
+
+    $configFile = __DIR__ . '/zkt-device-config.json';
+    $overridesFile = __DIR__ . '/zkt-time-overrides.json';
+
+    $readConfig = function() use ($configFile) {
+        if (getenv('ZKT_IP')) {
+            return [
+                'ip'        => trim(getenv('ZKT_IP')),
+                'port'      => intval(getenv('ZKT_PORT') ?: 4370),
+                'machineNo' => intval(getenv('ZKT_MACHINE_NO') ?: 102),
+            ];
+        }
+        if (file_exists($configFile)) {
+            $data = json_decode(file_get_contents($configFile), true);
+            if ($data) return $data;
+        }
+        return [
+            'ip'        => '192.168.68.40',
+            'port'      => 4370,
+            'machineNo' => 102,
+        ];
+    };
+
+    $getZk = function() use ($readConfig) {
+        $cfg = $readConfig();
+        $zk = new ZKTeco($cfg['ip'], $cfg['port'], 10);
+        $zk->connect();
+        return $zk;
+    };
+
+    $action = $parts[1] ?? null;
+
+    if ($action === 'device-config') {
+        if ($method === 'GET') {
+            echo json_encode($readConfig());
+            exit;
+        }
+        if ($method === 'POST') {
+            $body = json_decode(file_get_contents('php://input'), true);
+            $ip = $body['ip'] ?? '';
+            $port = $body['port'] ?? '';
+            if (!$ip || !$port) {
+                http_response_code(400);
+                echo json_encode(['success' => false, 'error' => 'ip and port required']);
+                exit;
+            }
+            $cfg = [
+                'ip'        => trim($ip),
+                'port'      => intval($port),
+                'machineNo' => intval($body['machineNo'] ?? 0)
+            ];
+            file_put_contents($configFile, json_encode($cfg, JSON_PRETTY_PRINT));
+            echo json_encode(['success' => true, 'config' => $cfg]);
+            exit;
+        }
+    }
+
+    if ($action === 'status') {
+        if ($method === 'GET') {
+            $cfg = $readConfig();
+            try {
+                $zk = $getZk();
+                $info = $zk->getInfo();
+                $zk->disconnect();
+                echo json_encode(array_merge([
+                    'connected' => true,
+                    'ip' => $cfg['ip'],
+                    'port' => $cfg['port'],
+                    'machineNo' => $cfg['machineNo']
+                ], $info));
+            } catch (Exception $e) {
+                echo json_encode([
+                    'connected' => false,
+                    'ip' => $cfg['ip'],
+                    'port' => $cfg['port'],
+                    'machineNo' => $cfg['machineNo'],
+                    'error' => $e->getMessage()
+                ]);
+            }
+            exit;
+        }
+    }
+
+    if ($action === 'attendance') {
+        if ($method === 'GET') {
+            try {
+                $zk = $getZk();
+                $records = $zk->getAttendances();
+                $zk->disconnect();
+
+                // Sort newest first
+                usort($records, function($a, $b) {
+                    return strcmp($b['recordTime'], $a['recordTime']);
+                });
+
+                echo json_encode([
+                    'success' => true,
+                    'total' => count($records),
+                    'records' => $records
+                ]);
+            } catch (Exception $e) {
+                http_response_code(500);
+                echo json_encode(['success' => false, 'error' => $e->getMessage()]);
+            }
+            exit;
+        }
+    }
+
+    if ($action === 'users') {
+        if ($method === 'GET') {
+            try {
+                $zk = $getZk();
+                $users = $zk->getUsers();
+                $zk->disconnect();
+                echo json_encode(['success' => true, 'users' => $users]);
+            } catch (Exception $e) {
+                http_response_code(500);
+                echo json_encode(['success' => false, 'error' => $e->getMessage()]);
+            }
+            exit;
+        }
+
+        if ($method === 'POST') {
+            $body = json_decode(file_get_contents('php://input'), true);
+            try {
+                $zk = $getZk();
+                $zk->writeUser(
+                    intval($body['uid'] ?? 0),
+                    strval($body['userId']),
+                    strval($body['name'] ?? ''),
+                    intval($body['cardno'] ?? 0),
+                    strval($body['password'] ?? ''),
+                    intval($body['role'] ?? 0)
+                );
+                $zk->disconnect();
+                echo json_encode(['success' => true]);
+            } catch (Exception $e) {
+                http_response_code(500);
+                echo json_encode(['success' => false, 'error' => $e->getMessage()]);
+            }
+            exit;
+        }
+
+        $userId = $parts[2] ?? null;
+        if ($userId) {
+            if ($method === 'PUT') {
+                $body = json_decode(file_get_contents('php://input'), true);
+                try {
+                    $zk = $getZk();
+                    $zk->writeUser(
+                        intval($body['uid'] ?? 0),
+                        $userId,
+                        strval($body['name'] ?? ''),
+                        intval($body['cardno'] ?? 0),
+                        strval($body['password'] ?? ''),
+                        intval($body['role'] ?? 0)
+                    );
+                    $zk->disconnect();
+                    echo json_encode(['success' => true]);
+                } catch (Exception $e) {
+                    http_response_code(500);
+                    echo json_encode(['success' => false, 'error' => $e->getMessage()]);
+                }
+                exit;
+            }
+
+            if ($method === 'DELETE') {
+                $body = json_decode(file_get_contents('php://input'), true);
+                try {
+                    $zk = $getZk();
+                    $zk->deleteUser(intval($body['uid'] ?? 0), $userId);
+                    $zk->disconnect();
+                    echo json_encode(['success' => true]);
+                } catch (Exception $e) {
+                    http_response_code(500);
+                    echo json_encode(['success' => false, 'error' => $e->getMessage()]);
+                }
+                exit;
+            }
+        }
+    }
+
+    if ($action === 'time-overrides') {
+        $readOverrides = function() use ($overridesFile) {
+            if (file_exists($overridesFile)) {
+                $data = json_decode(file_get_contents($overridesFile), true);
+                if ($data) return $data;
+            }
+            return new stdClass();
+        };
+
+        if ($method === 'GET') {
+            echo json_encode($readOverrides());
+            exit;
+        }
+
+        if ($method === 'POST') {
+            $body = json_decode(file_get_contents('php://input'), true);
+            $key = $body['key'] ?? '';
+            if (!$key) {
+                http_response_code(400);
+                echo json_encode(['success' => false, 'error' => 'key required']);
+                exit;
+            }
+            $overrides = (array)$readOverrides();
+            $overrides[$key] = [
+                'entry' => $body['entry'] ?? '',
+                'out' => $body['out'] ?? ''
+            ];
+            file_put_contents($overridesFile, json_encode($overrides, JSON_PRETTY_PRINT));
+            echo json_encode(['success' => true]);
+            exit;
+        }
+    }
+}
+
 http_response_code(404);
 echo json_encode(['error' => 'Endpoint not found']);
 ?>

@@ -14,3 +14,5 @@ coverage
 *.swp
 
 *.zip
+*zkt-device-config.json
+*zkt-time-overrides.json
