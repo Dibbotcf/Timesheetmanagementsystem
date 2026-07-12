@@ -142,7 +142,7 @@ export const Dashboard: React.FC = () => {
   const [folderToDelete, setFolderToDelete] = useState<string | null>(null);
   const [timesheetToDelete, setTimesheetToDelete] = useState<string | null>(null);
 
-  const isAdmin = currentUser?.role === 'Admin/HR';
+  const isAdmin = currentUser?.role === 'Admin/HR' || currentUser?.role === 'Superadmin';
   const isDIC = currentUser?.role === 'Staff' && currentUser?.designation === 'DIC';
 
   const myLeaves = React.useMemo(() => {

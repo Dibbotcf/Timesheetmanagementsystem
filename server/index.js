@@ -101,7 +101,7 @@ app.post('/api/auth/login', async (req, res) => {
             id: 'sys-admin-temp',
             name: 'Superadmin',
             eid: 'SYS001',
-            role: 'Admin/HR',
+            role: 'Superadmin',
             status: 'Active',
             dob: new Date().toISOString(),
             joiningDate: new Date().toISOString()
@@ -451,6 +451,195 @@ app.use('/api/upload-pdf', (err, req, res, next) => {
     next();
 });
 
+
+// --- ZKTeco Attendance Device ---
+
+const ZKLib = require('node-zklib');
+const ZKT_TIMEOUT = 10000;
+const ZKT_CONFIG_FILE = path.join(__dirname, 'zkt-device-config.json');
+
+function readZKTConfig() {
+    try { return JSON.parse(fs.readFileSync(ZKT_CONFIG_FILE, 'utf8')); } catch {}
+    return {
+        ip:        process.env.ZKT_IP   || '192.168.68.40',
+        port:      parseInt(process.env.ZKT_PORT || '4370', 10),
+        machineNo: 102,
+    };
+}
+
+async function zktConnect() {
+    const cfg = readZKTConfig();
+    const zk = new ZKLib(cfg.ip, cfg.port, ZKT_TIMEOUT, ZKT_TIMEOUT);
+    await zk.createSocket();
+    return zk;
+}
+
+// GET device config
+app.get('/api/zkt/device-config', (req, res) => {
+    res.json(readZKTConfig());
+});
+
+// POST device config (superadmin only — frontend enforces role)
+app.post('/api/zkt/device-config', (req, res) => {
+    const { ip, port, machineNo } = req.body;
+    if (!ip || !port) return res.status(400).json({ success: false, error: 'ip and port required' });
+    const cfg = { ip: ip.trim(), port: parseInt(port, 10), machineNo: parseInt(machineNo, 10) || 0 };
+    fs.writeFileSync(ZKT_CONFIG_FILE, JSON.stringify(cfg, null, 2));
+    res.json({ success: true, config: cfg });
+});
+
+app.get('/api/zkt/status', async (req, res) => {
+    let zk;
+    try {
+        zk = await zktConnect();
+        const info = await zk.getInfo();
+        const cfg = readZKTConfig();
+        res.json({ connected: true, ip: cfg.ip, port: cfg.port, machineNo: cfg.machineNo, ...info });
+    } catch (err) {
+        const cfg = readZKTConfig();
+        res.json({ connected: false, ip: cfg.ip, port: cfg.port, machineNo: cfg.machineNo, error: err.message });
+    } finally {
+        try { if (zk) await zk.disconnect(); } catch (_) {}
+    }
+});
+
+app.get('/api/zkt/attendance', async (req, res) => {
+    let zk;
+    try {
+        zk = await zktConnect();
+        const result = await zk.getAttendances();
+        const records = (result?.data || []).map(r => ({
+            deviceUserId: r.deviceUserId,
+            recordTime:   r.recordTime,  // actual field name from device
+        }));
+        // Sort newest first
+        records.sort((a, b) => new Date(b.recordTime) - new Date(a.recordTime));
+        res.json({ success: true, total: records.length, records });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    } finally {
+        try { if (zk) await zk.disconnect(); } catch (_) {}
+    }
+});
+
+app.get('/api/zkt/users', async (req, res) => {
+    let zk;
+    try {
+        zk = await zktConnect();
+        const result = await zk.getUsers();
+        res.json({ success: true, users: result?.data || [] });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    } finally {
+        try { if (zk) await zk.disconnect(); } catch (_) {}
+    }
+});
+
+// Encode a user into the 72-byte packet format ZKTeco expects
+function encodeUserData72(user) {
+    const buf = Buffer.alloc(72);
+    buf.writeUInt16LE(user.uid || 0, 0);
+    buf.writeUInt8(user.role || 0, 2);
+    const pwd = Buffer.from(user.password || '', 'ascii');
+    pwd.copy(buf, 3, 0, Math.min(pwd.length, 8));
+    const name = Buffer.from(user.name || '', 'ascii');
+    name.copy(buf, 11, 0, Math.min(name.length, 24));
+    buf.writeUInt32LE(user.cardno || 0, 35);
+    const uid = Buffer.from(String(user.userId || ''), 'ascii');
+    uid.copy(buf, 48, 0, Math.min(uid.length, 9));
+    return buf;
+}
+
+const CMD_USER_WRQ    = 8;
+const CMD_DELETE_USER = 18;
+const CMD_REFRESHDATA = 1013;
+
+// Create / update user
+app.post('/api/zkt/users', async (req, res) => {
+    const { uid, userId, name, cardno, password, role } = req.body;
+    let zk;
+    try {
+        zk = await zktConnect();
+        const packet = encodeUserData72({
+            uid:      parseInt(uid, 10) || 0,
+            userId:   String(userId),
+            name:     name || '',
+            cardno:   parseInt(cardno, 10) || 0,
+            password: password || '',
+            role:     parseInt(role, 10) || 0,
+        });
+        await zk.executeCmd(CMD_USER_WRQ, packet);
+        await zk.executeCmd(CMD_REFRESHDATA, '');
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    } finally {
+        try { if (zk) await zk.disconnect(); } catch (_) {}
+    }
+});
+
+app.put('/api/zkt/users/:userId', async (req, res) => {
+    const { uid, name, cardno, password, role, userId: bodyUserId } = req.body;
+    const userId = bodyUserId || req.params.userId;
+    let zk;
+    try {
+        zk = await zktConnect();
+        const packet = encodeUserData72({
+            uid:      parseInt(uid, 10),
+            userId,
+            name:     name || '',
+            cardno:   parseInt(cardno, 10) || 0,
+            password: password || '',
+            role:     parseInt(role, 10) || 0,
+        });
+        await zk.executeCmd(CMD_USER_WRQ, packet);
+        await zk.executeCmd(CMD_REFRESHDATA, '');
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    } finally {
+        try { if (zk) await zk.disconnect(); } catch (_) {}
+    }
+});
+
+app.delete('/api/zkt/users/:userId', async (req, res) => {
+    const userId = req.params.userId;
+    const { uid } = req.body;
+    let zk;
+    try {
+        zk = await zktConnect();
+        // DELETE_USER needs the full 72-byte packet with uid set
+        const packet = encodeUserData72({ uid: parseInt(uid, 10) || 0, userId, name: '', cardno: 0, password: '', role: 0 });
+        await zk.executeCmd(CMD_DELETE_USER, packet);
+        await zk.executeCmd(CMD_REFRESHDATA, '');
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    } finally {
+        try { if (zk) await zk.disconnect(); } catch (_) {}
+    }
+});
+
+// ── ZKT Attendance Time Overrides ──────────────────────────────────────────────
+const OVERRIDES_FILE = path.join(__dirname, 'zkt-time-overrides.json');
+
+function readOverrides() {
+    try { return JSON.parse(fs.readFileSync(OVERRIDES_FILE, 'utf8')); }
+    catch { return {}; }
+}
+
+app.get('/api/zkt/time-overrides', (req, res) => {
+    res.json(readOverrides());
+});
+
+app.post('/api/zkt/time-overrides', (req, res) => {
+    const { key, entry, out } = req.body;
+    if (!key) return res.status(400).json({ success: false, error: 'key required' });
+    const overrides = readOverrides();
+    overrides[key] = { entry: entry || '', out: out || '' };
+    fs.writeFileSync(OVERRIDES_FILE, JSON.stringify(overrides, null, 2));
+    res.json({ success: true });
+});
 
 server.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);

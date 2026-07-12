@@ -84,7 +84,7 @@ export const Settings: React.FC = () => {
     }
   };
 
-  const isAdmin = currentUser?.role === 'Admin/HR';
+  const isAdmin = currentUser?.role === 'Admin/HR' || currentUser?.role === 'Superadmin';
 
   return (
     <div className="space-y-6">

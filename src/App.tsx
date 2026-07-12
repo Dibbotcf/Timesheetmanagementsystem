@@ -95,7 +95,7 @@ export interface Employee {
   name: string;
   eid: string;
   designation: string;
-  role: 'Admin/HR' | 'Staff';
+  role: 'Admin/HR' | 'Staff' | 'Superadmin';
   status: 'Active' | 'Inactive';
   dob: string;
   joiningDate: string;
@@ -914,15 +914,15 @@ export default function App() {
               <Route path="/templates" element={<Templates />} />
               <Route path="/leaves" element={<LeaveManagement />} />
               <Route path="/overtime" element={<OTManagement />} />
-              <Route path="/reports" element={currentUser?.role === 'Admin/HR' ? <Reports /> : <Navigate to="/" />} />
+              <Route path="/reports" element={currentUser?.role === 'Admin/HR' || currentUser?.role === 'Superadmin' ? <Reports /> : <Navigate to="/" />} />
               <Route path="/issues" element={<IssueTracker />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/manual" element={<SystemManual />} />
               <Route path="/installation" element={<InstallationGuide />} />
               {/* Admin/HR only pages — Staff is redirected to Dashboard */}
-              <Route path="/create" element={currentUser?.role === 'Admin/HR' ? <Timesheet /> : <Navigate to="/" />} />
-              <Route path="/employees" element={currentUser?.role === 'Admin/HR' ? <Employees /> : <Navigate to="/" />} />
-              <Route path="/backups" element={currentUser?.role === 'Admin/HR' ? <Backups /> : <Navigate to="/" />} />
+              <Route path="/create" element={currentUser?.role === 'Admin/HR' || currentUser?.role === 'Superadmin' ? <Timesheet /> : <Navigate to="/" />} />
+              <Route path="/employees" element={currentUser?.role === 'Admin/HR' || currentUser?.role === 'Superadmin' ? <Employees /> : <Navigate to="/" />} />
+              <Route path="/backups" element={currentUser?.role === 'Admin/HR' || currentUser?.role === 'Superadmin' ? <Backups /> : <Navigate to="/" />} />
               <Route path="/policy" element={<Policy />} />
               <Route path="*" element={<Navigate to="/" />} />
             </Routes>
@@ -939,7 +939,7 @@ export default function App() {
 // --- Layout Component ---
 const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { currentUser, logout, previewData, disablePreview, issues, leaves } = useAppStore();
-  const isAdminUser = currentUser?.role === 'Admin/HR';
+  const isAdminUser = currentUser?.role === 'Admin/HR' || currentUser?.role === 'Superadmin';
   const pendingIssueCount = isAdminUser
     ? issues.filter(i => i.status === 'Open').length
     : issues.filter(i => i.status === 'Open' && i.employeeId === currentUser?.id).length;
@@ -960,7 +960,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 
   const navigation = [
     { name: 'Dashboard', href: '/', icon: LayoutDashboard },
-    ...(currentUser?.role === 'Admin/HR' ? [
+    ...(currentUser?.role === 'Admin/HR' || currentUser?.role === 'Superadmin' ? [
       { name: 'Create Timesheet', href: '/create', icon: FileText },
       { name: 'Employees', href: '/employees', icon: Users },
       { name: 'Templates', href: '/templates', icon: File },

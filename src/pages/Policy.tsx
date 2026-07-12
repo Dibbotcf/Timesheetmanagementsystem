@@ -19,7 +19,7 @@ const policies = [
 
 export const Policy: React.FC = () => {
   const { currentUser } = useAppStore();
-  const isAdmin = currentUser?.role === 'Admin/HR';
+  const isAdmin = currentUser?.role === 'Admin/HR' || currentUser?.role === 'Superadmin';
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [selectedPolicyId, setSelectedPolicyId] = useState<number | null>(null);

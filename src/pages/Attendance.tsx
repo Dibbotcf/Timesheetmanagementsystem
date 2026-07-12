@@ -254,7 +254,7 @@ export const Attendance: React.FC<{ dashboardMode?: boolean }> = ({ dashboardMod
     return totalMinutes > limitMinutes ? totalMinutes - limitMinutes : 0;
   }, [modalClockIn]);
 
-  const isAdmin = currentUser?.role === 'Admin/HR';
+  const isAdmin = currentUser?.role === 'Admin/HR' || currentUser?.role === 'Superadmin';
 
   // 1. Get Days in Month & Weekday mapping
   const daysInMonth = useMemo(() => {

@@ -26,7 +26,7 @@ const STATUS_CONFIG = {
 
 export const IssueTracker: React.FC = () => {
   const { currentUser, issues, addIssue, updateIssue, deleteIssue } = useAppStore();
-  const isAdmin = currentUser?.role === 'Admin/HR';
+  const isAdmin = currentUser?.role === 'Admin/HR' || currentUser?.role === 'Superadmin';
 
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [filterStatus, setFilterStatus] = useState<'All' | 'Open' | 'Resolved'>(isAdmin ? 'Open' : 'All');

@@ -2,13 +2,14 @@ import React, { useState, useRef } from 'react';
 import { useAppStore, Employee, LeaveRecord } from '../App';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
-import { ArrowLeft, Download, Smartphone, Calendar, Clock, ClipboardList, HelpCircle, Timer } from 'lucide-react';
+import { ArrowLeft, Download, Smartphone, Calendar, Clock, ClipboardList, HelpCircle, Timer, Fingerprint } from 'lucide-react';
 import { toast } from 'sonner';
 import { toPng } from 'html-to-image';
 import { jsPDF } from 'jspdf';
 import { SummaryReportView } from './OTManagement';
 import { EmployeeRecordsReport } from './EmployeeRecordsReport';
 import { LateDelayReport } from './LateDelayReport';
+import { ZKTAttendanceReport } from './ZKTAttendanceReport';
 
 export const Reports: React.FC = () => {
   const { employees, leaves, otRecords } = useAppStore();
@@ -274,7 +275,7 @@ export const Reports: React.FC = () => {
             </Card>
 
             {/* Card 4: Employee Records Report */}
-            <Card 
+            <Card
               className="hover:shadow-lg transition-all duration-300 border border-gray-200 cursor-pointer group hover:border-blue-300"
               onClick={() => setActiveReport('employee_records')}
             >
@@ -298,8 +299,36 @@ export const Reports: React.FC = () => {
                 </div>
               </CardContent>
             </Card>
+
+            {/* Card 5: ZKT Attendance Report */}
+            <Card
+              className="hover:shadow-lg transition-all duration-300 border border-gray-200 cursor-pointer group hover:border-emerald-300"
+              onClick={() => setActiveReport('zkt_attendance')}
+            >
+              <CardHeader className="flex flex-row items-center space-y-0 gap-4 pb-4">
+                <div className="p-3 rounded-lg bg-emerald-50 text-emerald-700 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
+                  <Fingerprint className="h-6 w-6" />
+                </div>
+                <div>
+                  <CardTitle className="text-lg font-bold group-hover:text-emerald-900">ZKT Attendance Report</CardTitle>
+                  <CardDescription className="text-xs mt-1">Live biometric device logs</CardDescription>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-gray-500">
+                  Pull attendance records directly from the ZKTeco biometric machine. View fingerprint, card, and face logs with date filters.
+                </p>
+                <div className="mt-4 flex justify-end">
+                  <Button variant="ghost" className="text-emerald-700 hover:text-emerald-900 font-semibold text-xs group-hover:translate-x-1 transition-transform">
+                    View Report &rarr;
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
           </div>
         </div>
+      ) : activeReport === 'zkt_attendance' ? (
+        <ZKTAttendanceReport onBack={() => setActiveReport(null)} />
       ) : activeReport === 'late_report' ? (
         <LateDelayReport onBack={() => setActiveReport(null)} />
       ) : activeReport === 'mobile_allowance' ? (
