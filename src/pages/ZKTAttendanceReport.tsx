@@ -20,6 +20,7 @@ interface ZKTUser {
 interface DeviceStatus {
   connected: boolean; ip: string; port: number; machineNo?: number;
   error?: string; userCounts?: number; logCounts?: number;
+  mode?: 'direct' | 'push' | 'offline'; lastSeen?: string | null;
 }
 
 interface DeviceConfig { ip: string; port: number; machineNo: number; }
@@ -410,9 +411,18 @@ export const ZKTAttendanceReport: React.FC<{ onBack: () => void }> = ({ onBack }
         <div style={{ background: status.connected ? '#f0fdf4' : '#fef2f2', border: `1px solid ${status.connected ? '#bbf7d0' : '#fecaca'}`, borderRadius: '12px', padding: '12px 18px', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
           <span style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 700, fontSize: '14px', color: status.connected ? '#15803d' : '#dc2626' }}>
             {status.connected ? <Wifi size={15} /> : <WifiOff size={15} />}
-            {status.connected ? 'Device Connected' : 'Device Unreachable'}
+            {status.connected ? (status.mode === 'push' ? 'Device Connected · Cloud Push' : 'Device Connected') : 'Device Unreachable'}
           </span>
-          <span style={{ background: '#e5e7eb', borderRadius: '999px', padding: '2px 10px', fontSize: '12px', color: '#374151' }}>IP: {status.ip}:{status.port}</span>
+          {status.mode === 'push' ? (
+            <span style={{ background: '#dcfce7', borderRadius: '999px', padding: '2px 10px', fontSize: '12px', color: '#15803d' }}>via hrm.tcfbd.com</span>
+          ) : (
+            <span style={{ background: '#e5e7eb', borderRadius: '999px', padding: '2px 10px', fontSize: '12px', color: '#374151' }}>IP: {status.ip}:{status.port}</span>
+          )}
+          {status.mode === 'push' && status.lastSeen && (
+            <span style={{ background: '#e5e7eb', borderRadius: '999px', padding: '2px 10px', fontSize: '12px', color: '#374151' }}>
+              Last push: {new Date(status.lastSeen).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+            </span>
+          )}
           {(deviceCfg?.machineNo ?? status.machineNo) ? (
             <span style={{ background: '#e5e7eb', borderRadius: '999px', padding: '2px 10px', fontSize: '12px', color: '#374151' }}>Machine No.: {deviceCfg?.machineNo ?? status.machineNo}</span>
           ) : null}

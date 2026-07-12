@@ -597,17 +597,32 @@ if ($parts[0] === 'zkt') {
                 $zk->disconnect();
                 echo json_encode(array_merge([
                     'connected' => true,
+                    'mode' => 'direct',
                     'ip' => $cfg['ip'],
                     'port' => $cfg['port'],
                     'machineNo' => $cfg['machineNo']
                 ], $info));
             } catch (Exception $e) {
+                // Direct TCP failed (normal from cloud). If the device has pushed
+                // via ADMS recently, it IS online — report connected via push.
+                $lastSeenFile = __DIR__ . '/zkt_device_lastseen.json';
+                $lastSeen = null;
+                $pushAlive = false;
+                if (file_exists($lastSeenFile)) {
+                    $lastSeen = json_decode(file_get_contents($lastSeenFile), true);
+                    if (!empty($lastSeen['time'])) {
+                        $age = time() - strtotime($lastSeen['time']);
+                        $pushAlive = ($age >= 0 && $age < 600); // seen in last 10 min
+                    }
+                }
                 echo json_encode([
-                    'connected' => false,
+                    'connected' => $pushAlive,
+                    'mode' => $pushAlive ? 'push' : 'offline',
                     'ip' => $cfg['ip'],
                     'port' => $cfg['port'],
                     'machineNo' => $cfg['machineNo'],
-                    'error' => $e->getMessage()
+                    'lastSeen' => $lastSeen['time'] ?? null,
+                    'error' => $pushAlive ? null : $e->getMessage()
                 ]);
             }
             exit;
