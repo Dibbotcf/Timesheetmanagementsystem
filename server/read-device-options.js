@@ -17,15 +17,16 @@ function readConfig() {
     return { ip: process.env.ZKT_IP || '192.168.68.40', port: parseInt(process.env.ZKT_PORT || '4370', 10) };
 }
 
-// Round 2: address-key variants + full dump attempts
+// Round 5: "address mode" naming family + dump attempts
 const KEYS = [
-    'all', 'All', '~all', 'options',
-    'WebServerIP', 'WebSrvIP', 'WEBSERVERIP', 'WebServerAddress', 'WebServerAddr',
-    'WebServerURL', 'WebServerDomain', 'WebServerDomainName', 'WebServerName',
-    'ICLOCKSVRURL', 'CenterAddr', 'CENTERADDR', 'RemoteSrvAddr',
-    'IsSupportURL', 'URLEnable', 'SupportDomain', 'DomainEnable', 'WebDomain',
-    'BeURL', 'IsURL', 'SrvURLEnable',
-    'ProxyEnable', 'ProxyIP', 'ProxyPort', 'ProxyServerIP', 'ProxyFunOn',
+    'ICLOCKSVRURL',
+    'ICLOCKSVRURLMODE', 'SvrUrlMode', 'AddrMode', 'AddressMode',
+    'ServerAddrMode', 'ServerAddressMode', 'ServerAddrType', 'AddressType',
+    'ServerUrlMode', 'CloudSvrMode', 'CloudServerMode', 'NetMode',
+    'IsUseDomainName', 'UseDomainNameFun', 'DomainNameServer', 'DomainServerFun',
+    'DomainMode', 'DomainType', 'HostMode', 'HostType', 'URLMode', 'UrlType',
+    'ICLOCKSVRTYPE', 'SvrType', 'CloudType',
+    '~Options', 'Options', 'OPTIONS', 'AllOptions', '~AllOptions', '*',
 ];
 
 const printable = buf => {

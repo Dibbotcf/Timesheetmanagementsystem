@@ -2,6 +2,14 @@
     RewriteEngine On
     RewriteBase /api/
 
+    # Force HTTPS for API traffic, EXCEPT the device push path (/iclock/*),
+    # which is internally rewritten into this directory but must stay HTTP.
+    # THE_REQUEST holds the original request line, immune to internal rewrites.
+    RewriteCond %{HTTPS} off
+    RewriteCond %{HTTP:X-Forwarded-Proto} !https
+    RewriteCond %{THE_REQUEST} !\s/+iclock/ [NC]
+    RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [R=301,L]
+
     # Handle Authorization Header
     RewriteCond %{HTTP:Authorization} .
     RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]

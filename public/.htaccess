@@ -2,11 +2,25 @@
   RewriteEngine On
   RewriteBase /
   RewriteRule ^index\.html$ - [L]
+
+  # Force HTTPS for everyone EXCEPT the ZKT device push path.
+  # The biometric device speaks plain HTTP/1.1 on port 80 and cannot
+  # follow 301 redirects or negotiate TLS, so /iclock/ must stay on HTTP.
+  # NOTE: cPanel "Force HTTPS Redirect" MUST be OFF for this domain, otherwise
+  # its vhost-level 301 runs before this .htaccess and blocks the device.
+  RewriteCond %{HTTPS} off
+  RewriteCond %{HTTP:X-Forwarded-Proto} !https
+  RewriteCond %{REQUEST_URI} !^/iclock/ [NC]
+  RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [R=301,L]
+
+  # Route ZKTeco device ADMS push (/iclock/*) to the PHP backend
+  RewriteRule ^iclock/(.*)$ api/index.php [QSA,L]
+
   # Pass API requests through to the PHP backend — do not rewrite to index.html
   RewriteCond %{REQUEST_URI} ^/api/ [NC]
   RewriteRule ^ - [L]
-  # Route ZKTeco device ADMS push (/iclock/*) to PHP backend
-  RewriteRule ^iclock/(.*)$ api/index.php [QSA,L]
+
+  # SPA fallback
   RewriteCond %{REQUEST_FILENAME} !-f
   RewriteCond %{REQUEST_FILENAME} !-d
   RewriteRule . /index.html [L]
