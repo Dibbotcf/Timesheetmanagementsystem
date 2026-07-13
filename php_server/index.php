@@ -11,6 +11,95 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 require_once 'db.php';
 
+// ── ADMS hardening / observability config ───────────────────────────────────
+// All overridable via environment (cPanel → Environment Variables or .env).
+if (!defined('ADMS_DEVICE_TZ')) {
+    // Device stamps punches in its own local time (handshake sends TimeZone=6).
+    // Fixed offset avoids any tz-database dependency on the host.
+    define('ADMS_DEVICE_TZ',        getenv('ADMS_DEVICE_TZ')        ?: '+06:00');
+    // No push seen within this many seconds ⇒ "stale".
+    define('ADMS_STALE_SECONDS',    (int)(getenv('ADMS_STALE_SECONDS') ?: 600));
+    // Business-hours window (device-local hour, 24h) used to decide when a
+    // stale device should actually raise an alert.
+    define('ADMS_BUSINESS_START',   getenv('ADMS_BUSINESS_START') !== false ? (int)getenv('ADMS_BUSINESS_START') : 8);
+    define('ADMS_BUSINESS_END',     getenv('ADMS_BUSINESS_END')   !== false ? (int)getenv('ADMS_BUSINESS_END')   : 20);
+    // Reserved SN used by the external HTTP canary — never a real device.
+    define('ADMS_CANARY_SN',        getenv('ADMS_CANARY_SN')       ?: '__CANARY__');
+    // Rolling latency sample cap (keeps the metrics file bounded).
+    define('ADMS_LATENCY_MAX',      (int)(getenv('ADMS_LATENCY_MAX') ?: 5000));
+    define('ADMS_SLA_SECONDS',      (int)(getenv('ADMS_SLA_SECONDS') ?: 30));
+}
+
+// Read–modify–write a JSON file under an exclusive lock, so concurrent device
+// pushes (or a push racing the /api/zkt/sync path) can never clobber each other
+// and lose records. This is the file-store equivalent of an idempotent,
+// serialized INSERT. $mutator receives the decoded array and returns the array
+// to persist (or null to abort the write).
+function adms_locked_json_update($file, callable $mutator) {
+    $fh = @fopen($file, 'c+');            // create if missing, don't truncate
+    if (!$fh) return false;
+    try {
+        if (!flock($fh, LOCK_EX)) { fclose($fh); return false; }
+        $raw  = stream_get_contents($fh);
+        $data = ($raw !== false && $raw !== '') ? json_decode($raw, true) : [];
+        if (!is_array($data)) $data = [];
+        $new = $mutator($data);
+        if ($new === null) { flock($fh, LOCK_UN); fclose($fh); return false; }
+        ftruncate($fh, 0);
+        rewind($fh);
+        fwrite($fh, json_encode($new));
+        fflush($fh);
+        flock($fh, LOCK_UN);
+    } finally {
+        fclose($fh);
+    }
+    return true;
+}
+
+function adms_read_json($file) {
+    if (!file_exists($file)) return [];
+    $d = json_decode(@file_get_contents($file), true);
+    return is_array($d) ? $d : [];
+}
+
+// Interpret a device-local "YYYY-MM-DDTHH:MM:SS" string as an absolute unix
+// epoch, so latency math is correct regardless of the PHP server's timezone.
+function adms_device_epoch($iso) {
+    $dt = DateTime::createFromFormat('Y-m-d\TH:i:s', $iso, new DateTimeZone(ADMS_DEVICE_TZ));
+    return $dt ? (float)$dt->getTimestamp() : null;
+}
+
+// Nearest-rank-with-interpolation percentile over a pre-sorted numeric array.
+function adms_percentile(array $sorted, $p) {
+    $n = count($sorted);
+    if ($n === 0) return null;
+    if ($n === 1) return $sorted[0];
+    $rank = ($p / 100) * ($n - 1);
+    $lo = (int)floor($rank); $hi = (int)ceil($rank);
+    if ($lo === $hi) return $sorted[$lo];
+    return round($sorted[$lo] + ($sorted[$hi] - $sorted[$lo]) * ($rank - $lo), 3);
+}
+
+// Append end-to-end latency samples (one per genuinely-new punch) to a bounded
+// rolling file. transport_s = T1(request received) − T0(punch); it captures the
+// device push cadence + network. backend_ms = T2(committed) − T1.
+function adms_record_latency(array $samples) {
+    $t2 = microtime(true);
+    adms_locked_json_update(__DIR__ . '/zkt_latency.json', function($data) use ($samples, $t2) {
+        foreach ($samples as $s) {
+            $data[] = [
+                'punch'       => $s['punch'],
+                'transport_s' => round($s['t1'] - $s['t0'], 3),
+                'backend_ms'  => round(($t2 - $s['t1']) * 1000, 1),
+                'at'          => date('c'),
+            ];
+        }
+        $n = count($data);
+        if ($n > ADMS_LATENCY_MAX) $data = array_slice($data, $n - ADMS_LATENCY_MAX);
+        return $data;
+    });
+}
+
 // Simple Router
 $uri = $_SERVER['REQUEST_URI'];
 $method = $_SERVER['REQUEST_METHOD'];
@@ -35,22 +124,35 @@ if (strpos($uri, '/iclock/') !== false) {
     // Read raw POST body ONCE and reuse — php://input can't be re-read reliably
     $rawBody = ($method === 'POST' || $method === 'PUT') ? file_get_contents('php://input') : '';
 
-    // Rolling diagnostic log of the last 60 device requests (exact protocol trace)
-    $logFile = __DIR__ . '/zkt_device_log.json';
-    $dlog = file_exists($logFile) ? (json_decode(file_get_contents($logFile), true) ?: []) : [];
-    $dlog[] = [
-        'time'    => date('c'),
-        'action'  => $iaction,
-        'method'  => $method,
-        'query'   => $_SERVER['QUERY_STRING'] ?? '',
-        'table'   => $table,
-        'bodyLen' => strlen($rawBody),
-        'bodyHead'=> substr($rawBody, 0, 300),
-    ];
-    if (count($dlog) > 60) $dlog = array_slice($dlog, -60);
-    @file_put_contents($logFile, json_encode($dlog));
+    // ── HTTP canary short-circuit ──────────────────────────────────────────
+    // The external canary hits /iclock/cdata?SN=__CANARY__ purely to prove this
+    // path is reachable over plain HTTP and is NOT redirected to HTTPS. It must
+    // NOT be logged or counted as a device contact (that would keep the health
+    // monitor permanently "healthy" even if the real device were dead).
+    if ($sn === ADMS_CANARY_SN) {
+        header('Content-Type: text/plain');
+        echo "OK CANARY\n";
+        exit;
+    }
+
+    // Rolling diagnostic log of the last 60 device requests (exact protocol
+    // trace). Locked read-modify-write so concurrent requests can't lose entries.
+    adms_locked_json_update(__DIR__ . '/zkt_device_log.json', function($dlog) use ($iaction, $method, $table, $rawBody) {
+        $dlog[] = [
+            'time'    => date('c'),
+            'action'  => $iaction,
+            'method'  => $method,
+            'query'   => $_SERVER['QUERY_STRING'] ?? '',
+            'table'   => $table,
+            'bodyLen' => strlen($rawBody),
+            'bodyHead'=> substr($rawBody, 0, 300),
+        ];
+        if (count($dlog) > 60) $dlog = array_slice($dlog, -60);
+        return $dlog;
+    });
 
     // Record every device contact so /api/zkt/adms-status can prove connectivity
+    // (single atomic overwrite — last-writer-wins is correct for "last seen").
     @file_put_contents(__DIR__ . '/zkt_device_lastseen.json', json_encode([
         'sn' => $sn, 'action' => $iaction, 'method' => $method,
         'time' => date('c'),
@@ -78,42 +180,51 @@ if (strpos($uri, '/iclock/') !== false) {
     // ── POST /iclock/cdata?table=ATTLOG — device pushes attendance ─────────
     if ($iaction === 'cdata' && $method === 'POST' && $table === 'ATTLOG') {
         $body = $rawBody;
+        // T1 = when this request was received (absolute unix epoch, TZ-independent).
+        $t1 = $_SERVER['REQUEST_TIME_FLOAT'] ?? microtime(true);
+        $received = 0; $added = 0; $latencySamples = [];
 
-        // Load existing records keyed by "userId|recordTime" for deduplication
-        $existing = [];
-        if (file_exists($pushedFile)) {
-            $saved = json_decode(file_get_contents($pushedFile), true);
-            if (is_array($saved)) {
-                foreach ($saved as $rec) {
-                    $k = ($rec['deviceUserId'] ?? '') . '|' . ($rec['recordTime'] ?? '');
-                    $existing[$k] = $rec;
+        // Locked read-modify-write: dedup by "userId|recordTime" is idempotent,
+        // and the exclusive lock guarantees two concurrent pushes can't drop rows.
+        adms_locked_json_update($pushedFile, function($saved) use ($body, $t1, &$received, &$added, &$latencySamples) {
+            $existing = [];
+            foreach ($saved as $rec) {
+                $k = ($rec['deviceUserId'] ?? '') . '|' . ($rec['recordTime'] ?? '');
+                $existing[$k] = $rec;
+            }
+
+            // ADMS ATTLOG format (pushver 2.x): PIN \t DateTime \t Status \t Verify \t WorkCode ...
+            // e.g. "21\t2026-07-13 09:10:12\t0\t4\t\t0\t0"  → DateTime is field [1].
+            foreach (explode("\n", trim($body)) as $line) {
+                $line = trim($line);
+                if (!$line) continue;
+                $f = explode("\t", $line);
+                if (count($f) < 2) continue;
+                $userId   = trim($f[0]);
+                $dateTime = trim($f[1]); // "2026-07-13 09:10:12"
+                if (!$userId || !$dateTime) continue;
+                // Guard: field must look like a datetime, not a status digit
+                if (!preg_match('/\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/', $dateTime)) continue;
+                $iso = str_replace(' ', 'T', $dateTime); // "2026-07-13T09:10:12"
+                $received++;
+                $k = "{$userId}|{$iso}";
+                if (!isset($existing[$k])) {
+                    $existing[$k] = ['deviceUserId' => $userId, 'recordTime' => $iso];
+                    $added++;
+                    // T0 = punch time (device-local → absolute epoch). Sample only
+                    // genuinely-new punches so re-pushed duplicates don't skew stats.
+                    $t0 = adms_device_epoch($iso);
+                    if ($t0 !== null) {
+                        $latencySamples[] = ['punch' => $iso, 't0' => $t0, 't1' => $t1];
+                    }
                 }
             }
-        }
+            return array_values($existing);
+        });
 
-        // ADMS ATTLOG format (pushver 2.x): PIN \t DateTime \t Status \t Verify \t WorkCode \t ...
-        // e.g. "21\t2026-07-13 09:10:12\t0\t4\t\t0\t0"  → DateTime is field [1].
-        $received = 0; $added = 0;
-        foreach (explode("\n", trim($body)) as $line) {
-            $line = trim($line);
-            if (!$line) continue;
-            $f = explode("\t", $line);
-            if (count($f) < 2) continue;
-            $userId   = trim($f[0]);
-            $dateTime = trim($f[1]); // "2026-07-13 09:10:12"
-            if (!$userId || !$dateTime) continue;
-            // Guard: field must look like a datetime, not a status digit
-            if (!preg_match('/\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/', $dateTime)) continue;
-            $iso = str_replace(' ', 'T', $dateTime); // "2026-07-13T09:10:12"
-            $received++;
-            $k = "{$userId}|{$iso}";
-            if (!isset($existing[$k])) {
-                $existing[$k] = ['deviceUserId' => $userId, 'recordTime' => $iso];
-                $added++;
-            }
-        }
+        // T2 = commit time — recorded inside adms_record_latency().
+        if ($latencySamples) adms_record_latency($latencySamples);
 
-        file_put_contents($pushedFile, json_encode(array_values($existing)));
         // Acknowledge ALL received records (not just new ones) so the device
         // never retries duplicates in a loop.
         echo "OK: {$received}\n";
@@ -773,21 +884,20 @@ if ($parts[0] === 'zkt') {
 
         $attAdded = 0; $usersAdded = 0;
 
-        // Merge attendance records
+        // Merge attendance records (locked — safe against a concurrent device push)
         if (!empty($body['records']) && is_array($body['records'])) {
-            $existing = [];
-            if (file_exists($pushedFile)) {
-                $saved = json_decode(file_get_contents($pushedFile), true) ?: [];
+            adms_locked_json_update($pushedFile, function($saved) use ($body, &$attAdded) {
+                $existing = [];
                 foreach ($saved as $rec) {
                     $k = ($rec['deviceUserId'] ?? '') . '|' . ($rec['recordTime'] ?? '');
                     $existing[$k] = $rec;
                 }
-            }
-            foreach ($body['records'] as $rec) {
-                $k = ($rec['deviceUserId'] ?? '') . '|' . ($rec['recordTime'] ?? '');
-                if (!isset($existing[$k])) { $existing[$k] = $rec; $attAdded++; }
-            }
-            file_put_contents($pushedFile, json_encode(array_values($existing)));
+                foreach ($body['records'] as $rec) {
+                    $k = ($rec['deviceUserId'] ?? '') . '|' . ($rec['recordTime'] ?? '');
+                    if (!isset($existing[$k])) { $existing[$k] = $rec; $attAdded++; }
+                }
+                return array_values($existing);
+            });
         }
 
         // Overwrite users (fresher list always wins)
@@ -832,7 +942,60 @@ if ($parts[0] === 'zkt') {
             $key = $e['method'] . ' ' . $e['action'] . ($e['table'] ? ('?table=' . $e['table']) : '');
             $summary[$key] = ($summary[$key] ?? 0) + 1;
         }
+
+        // ── Health assessment ──────────────────────────────────────────────
+        // "Stale" = no device contact within ADMS_STALE_SECONDS. It only becomes
+        // an actionable alert during business hours (nobody punches overnight).
+        $now          = time();
+        $lastSeenTime = $lastSeen['time'] ?? null;
+        $ageSeconds   = $lastSeenTime ? ($now - strtotime($lastSeenTime)) : null;
+        $localHour    = (int)(new DateTime('now', new DateTimeZone(ADMS_DEVICE_TZ)))->format('G');
+        $inBusiness   = ($localHour >= ADMS_BUSINESS_START && $localHour < ADMS_BUSINESS_END);
+        if ($ageSeconds === null)            { $status = 'never_seen'; $healthy = false; }
+        elseif ($ageSeconds < 0)             { $status = 'clock_skew'; $healthy = false; }
+        elseif ($ageSeconds < ADMS_STALE_SECONDS) { $status = 'healthy'; $healthy = true; }
+        else                                 { $status = 'stale';   $healthy = false; }
+        $alert = ($inBusiness && !$healthy);
+        $health = [
+            'status'                  => $status,   // healthy | stale | never_seen | clock_skew
+            'healthy'                 => $healthy,
+            'last_seen'               => $lastSeenTime,
+            'last_seen_age_seconds'   => $ageSeconds,
+            'stale_threshold_seconds' => ADMS_STALE_SECONDS,
+            'device_local_hour'       => $localHour,
+            'in_business_hours'       => $inBusiness,
+            'alert'                   => $alert,    // true ⇒ page someone
+        ];
+
+        // ── End-to-end latency percentiles ─────────────────────────────────
+        $lat   = adms_read_json(__DIR__ . '/zkt_latency.json');
+        $tvals = array_column($lat, 'transport_s'); sort($tvals);
+        $bvals = array_column($lat, 'backend_ms');  sort($bvals);
+        $tp95  = adms_percentile($tvals, 95);
+        $latency = [
+            'samples'            => count($lat),
+            'transport_seconds'  => [ // device push cadence + network (T1 − T0)
+                'p50' => adms_percentile($tvals, 50),
+                'p95' => $tp95,
+                'p99' => adms_percentile($tvals, 99),
+                'max' => $tvals ? round(max($tvals), 3) : null,
+            ],
+            'backend_ms'         => [ // server parse+dedup+commit (T2 − T1)
+                'p50' => adms_percentile($bvals, 50),
+                'p95' => adms_percentile($bvals, 95),
+                'p99' => adms_percentile($bvals, 99),
+                'max' => $bvals ? round(max($bvals), 1) : null,
+            ],
+            'sla_target_seconds'        => ADMS_SLA_SECONDS,
+            'transport_p95_within_sla'  => $tp95 === null ? null : ($tp95 <= ADMS_SLA_SECONDS),
+        ];
+
+        // Monitor mode (?monitor): return 503 so uptime tools alert automatically.
+        if (isset($_GET['monitor']) && $alert) http_response_code(503);
+
         echo json_encode([
+            'health'                  => $health,
+            'latency'                 => $latency,
             'adms_attendance_records' => $attRecords,
             'adms_latest_record'      => $attLatest,
             'adms_user_count'         => $userCount,
