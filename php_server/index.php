@@ -32,6 +32,24 @@ if (strpos($uri, '/iclock/') !== false) {
     $table   = $_GET['table'] ?? '';
     $pushedFile = __DIR__ . '/zkt_pushed_attendance.json';
 
+    // Read raw POST body ONCE and reuse — php://input can't be re-read reliably
+    $rawBody = ($method === 'POST' || $method === 'PUT') ? file_get_contents('php://input') : '';
+
+    // Rolling diagnostic log of the last 60 device requests (exact protocol trace)
+    $logFile = __DIR__ . '/zkt_device_log.json';
+    $dlog = file_exists($logFile) ? (json_decode(file_get_contents($logFile), true) ?: []) : [];
+    $dlog[] = [
+        'time'    => date('c'),
+        'action'  => $iaction,
+        'method'  => $method,
+        'query'   => $_SERVER['QUERY_STRING'] ?? '',
+        'table'   => $table,
+        'bodyLen' => strlen($rawBody),
+        'bodyHead'=> substr($rawBody, 0, 300),
+    ];
+    if (count($dlog) > 60) $dlog = array_slice($dlog, -60);
+    @file_put_contents($logFile, json_encode($dlog));
+
     // Record every device contact so /api/zkt/adms-status can prove connectivity
     @file_put_contents(__DIR__ . '/zkt_device_lastseen.json', json_encode([
         'sn' => $sn, 'action' => $iaction, 'method' => $method,
@@ -59,7 +77,7 @@ if (strpos($uri, '/iclock/') !== false) {
 
     // ── POST /iclock/cdata?table=ATTLOG — device pushes attendance ─────────
     if ($iaction === 'cdata' && $method === 'POST' && $table === 'ATTLOG') {
-        $body = file_get_contents('php://input');
+        $body = $rawBody;
 
         // Load existing records keyed by "userId|recordTime" for deduplication
         $existing = [];
@@ -73,18 +91,22 @@ if (strpos($uri, '/iclock/') !== false) {
             }
         }
 
-        // Parse tab-separated records: PIN \t Verify \t DateTime \t Status ...
-        $added = 0;
+        // ADMS ATTLOG format (pushver 2.x): PIN \t DateTime \t Status \t Verify \t WorkCode \t ...
+        // e.g. "21\t2026-07-13 09:10:12\t0\t4\t\t0\t0"  → DateTime is field [1].
+        $received = 0; $added = 0;
         foreach (explode("\n", trim($body)) as $line) {
             $line = trim($line);
             if (!$line) continue;
             $f = explode("\t", $line);
-            if (count($f) < 3) continue;
+            if (count($f) < 2) continue;
             $userId   = trim($f[0]);
-            $dateTime = trim($f[2]); // "2024-07-12 08:30:00"
+            $dateTime = trim($f[1]); // "2026-07-13 09:10:12"
             if (!$userId || !$dateTime) continue;
-            $iso = str_replace(' ', 'T', $dateTime); // "2024-07-12T08:30:00"
-            $k   = "{$userId}|{$iso}";
+            // Guard: field must look like a datetime, not a status digit
+            if (!preg_match('/\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/', $dateTime)) continue;
+            $iso = str_replace(' ', 'T', $dateTime); // "2026-07-13T09:10:12"
+            $received++;
+            $k = "{$userId}|{$iso}";
             if (!isset($existing[$k])) {
                 $existing[$k] = ['deviceUserId' => $userId, 'recordTime' => $iso];
                 $added++;
@@ -92,13 +114,15 @@ if (strpos($uri, '/iclock/') !== false) {
         }
 
         file_put_contents($pushedFile, json_encode(array_values($existing)));
-        echo "OK: {$added}\n";
+        // Acknowledge ALL received records (not just new ones) so the device
+        // never retries duplicates in a loop.
+        echo "OK: {$received}\n";
         exit;
     }
 
     // ── POST /iclock/cdata?table=USERINFO — device pushes user list ───────
     if ($iaction === 'cdata' && $method === 'POST' && $table === 'USERINFO') {
-        $body = file_get_contents('php://input');
+        $body = $rawBody;
         $pushedUsersFile = __DIR__ . '/zkt_pushed_users.json';
 
         $existing = [];
@@ -643,6 +667,10 @@ if ($parts[0] === 'zkt') {
                 // Fallback: use data pushed by the device via ADMS
                 if (file_exists($pushedFile)) {
                     $records = json_decode(file_get_contents($pushedFile), true) ?: [];
+                    // Drop any malformed records (e.g. recordTime "0" from an old parser bug)
+                    $records = array_values(array_filter($records, fn($r) =>
+                        isset($r['recordTime']) && preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/', $r['recordTime'])
+                    ));
                     usort($records, fn($a, $b) => strcmp($b['recordTime'], $a['recordTime']));
                     echo json_encode(['success' => true, 'total' => count($records), 'records' => $records, 'source' => 'push']);
                 } else {
@@ -793,6 +821,17 @@ if ($parts[0] === 'zkt') {
         if (file_exists($lastSeenFile)) {
             $lastSeen = json_decode(file_get_contents($lastSeenFile), true);
         }
+        $devLog = [];
+        $logFile = __DIR__ . '/zkt_device_log.json';
+        if (file_exists($logFile)) {
+            $devLog = json_decode(file_get_contents($logFile), true) ?: [];
+        }
+        // Summarise recent request actions/tables and return the tail
+        $summary = [];
+        foreach ($devLog as $e) {
+            $key = $e['method'] . ' ' . $e['action'] . ($e['table'] ? ('?table=' . $e['table']) : '');
+            $summary[$key] = ($summary[$key] ?? 0) + 1;
+        }
         echo json_encode([
             'adms_attendance_records' => $attRecords,
             'adms_latest_record'      => $attLatest,
@@ -800,6 +839,8 @@ if ($parts[0] === 'zkt') {
             'pushed_att_file_exists'  => file_exists($pushedFile),
             'pushed_users_file_exists'=> file_exists($usersFile),
             'device_last_seen'        => $lastSeen,
+            'request_summary'         => $summary,
+            'recent_requests'         => array_slice($devLog, -15),
         ]);
         exit;
     }
