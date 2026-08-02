@@ -503,7 +503,7 @@ export const TimesheetView: React.FC = () => {
   return (
     <div className="min-h-screen bg-gray-100 pb-10 print:bg-white print:pb-0">
         {/* Toolbar - Hidden on Print */}
-        <div className="bg-white border-b px-8 py-4 flex justify-between items-center sticky top-0 z-10 print:hidden shadow-sm">
+        <div className="bg-white border-b px-8 py-4 flex justify-between items-center sticky top-0 z-30 print:hidden shadow-sm">
             <div className="flex items-center gap-4">
                 <Button variant="ghost" size="icon" onClick={() => navigate('/')}>
                     <ArrowLeft className="h-5 w-5" />

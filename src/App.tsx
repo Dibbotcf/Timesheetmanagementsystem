@@ -45,6 +45,7 @@ export interface IssueTicket {
   status: 'Open' | 'Resolved';
   createdAt: string;
   resolvedAt?: string;
+  resolutionNote?: string;
 }
 
 export interface OTRecord {
@@ -938,7 +939,7 @@ export default function App() {
 
 // --- Layout Component ---
 const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { currentUser, logout, previewData, disablePreview, issues, leaves } = useAppStore();
+  const { currentUser, logout, previewData, disablePreview, issues, leaves, otRecords } = useAppStore();
   const isAdminUser = currentUser?.role === 'Admin/HR' || currentUser?.role === 'Superadmin';
   const pendingIssueCount = isAdminUser
     ? issues.filter(i => i.status === 'Open').length
@@ -955,6 +956,9 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         (l.status === 'Approved' && !l.hardCopyCollected && needsHardCopyCheck(l))
       )).length
     : 0;
+  const pendingOTCount = isAdminUser
+    ? otRecords.filter(o => o.status === 'Pending').length
+    : otRecords.filter(o => o.status === 'Pending' && o.employeeId === currentUser?.id).length;
   const location = useLocation();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
@@ -1028,6 +1032,11 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
                         {othersPendingLeaveCount}
                       </span>
                     )}
+                  </span>
+                )}
+                {(item.name === 'Overtime' || item.name === 'My Overtime') && pendingOTCount > 0 && (
+                  <span style={{ background: '#f59e0b', color: '#fff', fontSize: '11px', fontWeight: 700, minWidth: '20px', height: '20px', borderRadius: '9999px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 6px' }}>
+                    {pendingOTCount}
                   </span>
                 )}
               </Link>

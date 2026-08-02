@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '../App';
+import { isTimesheetComplete, isMonthOver } from '../lib/timesheetStatus';
 
 // --- Custom Status SVGs (matching premium SVGRepo styling) ---
 const PresentIcon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -76,7 +77,7 @@ export const StatusSymbol: React.FC<{ status: AttendanceStatus; className?: stri
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
-import { Folder, Plus, FileText, Clock, Trash2, ChevronRight, EyeOff, CalendarDays, CalendarCheck } from 'lucide-react';
+import { Folder, Plus, FileText, Clock, Trash2, ChevronRight, EyeOff, CalendarDays, CalendarCheck, CheckCircle2 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger, DialogFooter } from '../components/ui/dialog';
 import { Checkbox } from '../components/ui/checkbox';
@@ -613,9 +614,15 @@ export const Dashboard: React.FC = () => {
                     ? ts.submissions[ts.submissions.length - 1] 
                     : null;
                   
-                  const isToday = lastSubmission 
+                  const isToday = lastSubmission
                     ? new Date(lastSubmission.timestamp).toDateString() === new Date().toDateString()
                     : false;
+
+                  // "Completed" (green) once the month is over AND every working day is filled in
+                  const tsTemplate = templates.find(t => t.year === ts.year && t.month === ts.month);
+                  const isCompleted = !!lastSubmission
+                    && isMonthOver(ts.year, ts.month)
+                    && isTimesheetComplete(ts, tsTemplate, leaves);
 
                   // Glow green if ANY row was signed by Admin today
                   const todayStr = new Date().toDateString();
@@ -664,12 +671,25 @@ export const Dashboard: React.FC = () => {
                       
                       {lastSubmission && (
                         <div className="flex flex-col items-center justify-center px-4">
-                          <span className={`font-bold text-xs ${isToday ? 'text-green-600' : 'text-red-600'}`}>
-                            Submitted
-                          </span>
-                          <span className={`text-xs ${isToday ? 'text-green-600' : 'text-red-600'}`}>
-                            {new Date(lastSubmission.timestamp).toLocaleDateString()} {new Date(lastSubmission.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </span>
+                          {isCompleted ? (
+                            <>
+                              <span className="inline-flex items-center gap-1 font-bold text-xs text-green-600">
+                                <CheckCircle2 className="h-3.5 w-3.5" /> Completed
+                              </span>
+                              <span className="text-xs text-green-600">
+                                {new Date(lastSubmission.timestamp).toLocaleDateString()} {new Date(lastSubmission.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                            </>
+                          ) : (
+                            <>
+                              <span className={`font-bold text-xs ${isToday ? 'text-green-600' : 'text-red-600'}`}>
+                                Submitted
+                              </span>
+                              <span className={`text-xs ${isToday ? 'text-green-600' : 'text-red-600'}`}>
+                                {new Date(lastSubmission.timestamp).toLocaleDateString()} {new Date(lastSubmission.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                            </>
+                          )}
                         </div>
                       )}
 

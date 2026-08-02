@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { useAppStore } from '../App';
+import { useAppStore, IssueTicket } from '../App';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Textarea } from '../components/ui/textarea';
@@ -36,6 +36,10 @@ export const IssueTracker: React.FC = () => {
   const [newIssue, setNewIssue] = useState<{ title: string; description: string; priority: 'Low' | 'Medium' | 'High' }>({
     title: '', description: '', priority: 'Medium',
   });
+
+  // Resolve-with-note modal state
+  const [resolveTarget, setResolveTarget] = useState<IssueTicket | null>(null);
+  const [resolveNote, setResolveNote] = useState('');
 
   const filteredIssues = useMemo(() =>
     issues
@@ -90,9 +94,25 @@ export const IssueTracker: React.FC = () => {
     toast.success('Issue reported successfully');
   };
 
-  const handleResolve = (id: string) => {
-    updateIssue(id, { status: 'Resolved', resolvedAt: new Date().toISOString() });
+  const openResolve = (issue: IssueTicket) => {
+    setResolveTarget(issue);
+    setResolveNote('');
+  };
+
+  const confirmResolve = () => {
+    if (!resolveTarget) return;
+    if (!resolveNote.trim()) {
+      toast.error('Please describe the fix that was done');
+      return;
+    }
+    updateIssue(resolveTarget.id, {
+      status: 'Resolved',
+      resolvedAt: new Date().toISOString(),
+      resolutionNote: resolveNote.trim(),
+    });
     toast.success('Issue marked as resolved');
+    setResolveTarget(null);
+    setResolveNote('');
   };
 
   const handleDelete = (id: string) => {
@@ -290,6 +310,16 @@ export const IssueTracker: React.FC = () => {
                           </span>
                         )}
                       </div>
+
+                      {/* Resolution note (shown once resolved with a note) */}
+                      {issue.status === 'Resolved' && issue.resolutionNote && (
+                        <div className="mt-2.5 flex items-start gap-1.5 rounded-lg bg-emerald-50 border border-emerald-100 px-3 py-2">
+                          <MessageSquareDot className="h-3.5 w-3.5 text-emerald-600 mt-0.5 shrink-0" />
+                          <p className="text-xs text-emerald-800 whitespace-pre-wrap leading-relaxed">
+                            <span className="font-semibold">Fix / Resolution: </span>{issue.resolutionNote}
+                          </p>
+                        </div>
+                      )}
                     </div>
 
                     {/* Right: status + actions */}
@@ -316,7 +346,7 @@ export const IssueTracker: React.FC = () => {
                       {/* Mark Resolve button — blue, only for open issues */}
                       {isAdmin && issue.status === 'Open' && (
                         <button
-                          onClick={() => handleResolve(issue.id)}
+                          onClick={() => openResolve(issue)}
                           style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#2563eb', color: '#fff', fontSize: '12px', fontWeight: 600, padding: '6px 12px', borderRadius: '8px', border: 'none', cursor: 'pointer' }}
                           onMouseEnter={e => (e.currentTarget.style.background = '#1d4ed8')}
                           onMouseLeave={e => (e.currentTarget.style.background = '#2563eb')}
@@ -420,6 +450,56 @@ export const IssueTracker: React.FC = () => {
               onMouseLeave={e => (e.currentTarget.style.background = '#0f172a')}
             >
               <Plus className="h-4 w-4" /> Submit Issue
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Resolve Issue Dialog (capture the fix note) ── */}
+      <Dialog open={!!resolveTarget} onOpenChange={open => { if (!open) { setResolveTarget(null); setResolveNote(''); } }}>
+        <DialogContent className="rounded-2xl" style={{ width: '500px', maxWidth: '95vw', padding: '32px 32px 28px' }}>
+          <DialogTitle className="text-xl font-bold text-slate-900 leading-tight">Resolve Issue</DialogTitle>
+          <p className="text-sm text-slate-500 mt-1">Add a note describing what fix was done, then mark it resolved.</p>
+          <DialogDescription className="sr-only">Mark this issue as resolved with a resolution note</DialogDescription>
+
+          {resolveTarget && (
+            <div style={{ marginTop: '20px' }}>
+              {/* Issue being resolved */}
+              <div className="rounded-lg bg-slate-50 border border-slate-200 px-3 py-2" style={{ marginBottom: '16px' }}>
+                <p className="text-xs text-slate-400 font-medium">Issue</p>
+                <p className="text-sm font-semibold text-slate-800">{resolveTarget.title}</p>
+              </div>
+
+              <label className="block text-sm font-medium text-slate-700" style={{ marginBottom: '6px' }}>
+                Resolution Note — what fix was done? <span className="text-red-500">*</span>
+              </label>
+              <Textarea
+                autoFocus
+                placeholder="e.g. Reset the employee's timesheet permissions and re-synced June data…"
+                className="text-sm resize-none"
+                style={{ width: '100%', minHeight: '120px' }}
+                value={resolveNote}
+                onChange={e => setResolveNote(e.target.value)}
+              />
+            </div>
+          )}
+
+          <div style={{ marginTop: '28px', display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+            <button
+              type="button"
+              onClick={() => { setResolveTarget(null); setResolveNote(''); }}
+              style={{ padding: '9px 22px', fontSize: '14px', fontWeight: 500, color: '#64748b', background: 'transparent', border: '1.5px solid #e2e8f0', borderRadius: '8px', cursor: 'pointer' }}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={confirmResolve}
+              style={{ display: 'flex', alignItems: 'center', gap: '7px', padding: '9px 22px', fontSize: '14px', fontWeight: 600, color: '#fff', background: '#2563eb', border: 'none', borderRadius: '8px', cursor: 'pointer' }}
+              onMouseEnter={e => (e.currentTarget.style.background = '#1d4ed8')}
+              onMouseLeave={e => (e.currentTarget.style.background = '#2563eb')}
+            >
+              <CheckCircle className="h-4 w-4" /> Mark Resolved
             </button>
           </div>
         </DialogContent>
