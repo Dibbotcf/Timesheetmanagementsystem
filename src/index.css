@@ -4867,3 +4867,72 @@ html {
   50%  { box-shadow: 0 0 0 3px rgba(34,197,94,0.55), 0 0 22px 6px rgba(34,197,94,0.30); }
   100% { box-shadow: 0 0 0 2px rgba(34,197,94,0.30), 0 0 10px 2px rgba(34,197,94,0.15); }
 }
+
+/* Birthday celebration banner */
+.hbd-banner { animation: hbdGlow 2.6s ease-in-out infinite; }
+@keyframes hbdGlow {
+  0%, 100% { box-shadow: 0 8px 22px rgba(219,39,119,0.28); }
+  50%      { box-shadow: 0 10px 32px rgba(124,58,237,0.45); }
+}
+.hbd-bounce {
+  display: inline-block;
+  transform-origin: center bottom;
+  animation: hbdBounce 1.2s ease-in-out infinite;
+}
+@keyframes hbdBounce {
+  0%, 100% { transform: translateY(0) rotate(-6deg); }
+  50%      { transform: translateY(-6px) rotate(6deg); }
+}
+.hbd-shine {
+  position: absolute; top: 0; left: 0; height: 100%; width: 45%;
+  background: linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.35) 50%, rgba(255,255,255,0) 100%);
+  transform: translateX(-130%);
+  animation: hbdShine 3.2s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes hbdShine {
+  0%   { transform: translateX(-130%); }
+  60%  { transform: translateX(230%); }
+  100% { transform: translateX(230%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hbd-banner, .hbd-bounce, .hbd-shine { animation: none; }
+}
+
+/* Birthday confetti overlay */
+.confetti-container {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 0;
+}
+.firework {
+  position: absolute;
+  width: 0;
+  height: 0;
+}
+.fw-spark {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 5px;
+  height: 5px;
+  border-radius: 9999px;
+  opacity: 0;
+  will-change: transform, opacity;
+  box-shadow: 0 0 6px currentColor;
+  animation-name: fw-spark;
+  animation-timing-function: ease-out;
+  animation-iteration-count: infinite;
+}
+@keyframes fw-spark {
+  0%   { transform: translate(0, 0) scale(1.2); opacity: 1; }
+  10%  { opacity: 1; }
+  55%  { transform: translate(var(--tx, 0), var(--ty, 0)) scale(0.5); opacity: 0.85; }
+  75%  { transform: translate(var(--tx, 0), var(--ty, 0)) scale(0.3); opacity: 0; }
+  100% { transform: translate(var(--tx, 0), var(--ty, 0)) scale(0.3); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .confetti-container { display: none; }
+}

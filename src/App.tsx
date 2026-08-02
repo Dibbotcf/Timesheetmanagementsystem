@@ -991,7 +991,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       <aside className="hidden md:flex w-64 flex-col fixed inset-y-0 bg-[#1a237e] text-white shadow-xl z-20">
         <div className="p-6 border-b border-blue-800">
           <h1 className="text-xl font-bold tracking-wider">TCF Timesheet</h1>
-          <p className="text-xs text-blue-200 mt-1">System v3.0</p>
+          <p className="text-xs text-blue-200 mt-1">System v4.0</p>
         </div>
 
         {previewData && (

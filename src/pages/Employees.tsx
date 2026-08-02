@@ -1,6 +1,6 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import { useAppStore, Employee, Signature } from '../App';
-import { Plus, Search, User, MoreHorizontal, Pencil, Trash2, Eye, Upload, Image as ImageIcon } from 'lucide-react';
+import { Plus, Search, MoreHorizontal, Pencil, Trash2, Eye, Upload, Image as ImageIcon, Cake, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import {
@@ -37,6 +37,14 @@ import {
 } from "../components/ui/alert-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { AspectRatio } from "../components/ui/aspect-ratio";
+
+const MONTH_ABBR = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+
+// Soft role pill colors (inline styles — Tailwind v4 purges dynamic color classes)
+const roleBadge = (role: string) =>
+  role === 'Superadmin' ? { bg: '#f3e8ff', fg: '#7c3aed' }
+  : role === 'Admin/HR' ? { bg: '#eff6ff', fg: '#1d4ed8' }
+  : { bg: '#f1f5f9', fg: '#475569' };
 
 export const Employees: React.FC = () => {
   const { employees, addEmployee, updateEmployee, deleteEmployee, signatures, addSignature, deleteSignature } = useAppStore();
@@ -80,6 +88,50 @@ export const Employees: React.FC = () => {
     if (aNum !== bNum) return aNum - bNum;
     return eIdA.localeCompare(eIdB);
   });
+
+  // Birthdays (active employees), ordered by calendar date Jan → Dec
+  const upcomingBirthdays = useMemo(() => {
+    const list: { emp: Employee; month: number; day: number }[] = [];
+    for (const e of employees) {
+      if (e.status !== 'Active' || !e.dob) continue;
+      const d = new Date(e.dob);
+      if (isNaN(d.getTime())) continue;
+      list.push({ emp: e, month: d.getMonth(), day: d.getDate() });
+    }
+    return list.sort((a, b) => a.month - b.month || a.day - b.day);
+  }, [employees]);
+
+  // Current-month calendar data (for the birthday calendar view)
+  const _today = new Date();
+  const realTodayY = _today.getFullYear();
+  const realTodayM = _today.getMonth();
+  const realTodayD = _today.getDate();
+  const [viewYear, setViewYear] = useState(realTodayY);
+  const [viewMonth, setViewMonth] = useState(realTodayM);
+  const shiftMonth = (delta: number) => {
+    const d = new Date(viewYear, viewMonth + delta, 1);
+    setViewYear(d.getFullYear());
+    setViewMonth(d.getMonth());
+  };
+  const calMonthName = new Date(viewYear, viewMonth, 1).toLocaleString('default', { month: 'long' });
+  const calFirstWeekday = new Date(viewYear, viewMonth, 1).getDay();
+  const calDaysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+  const isViewingCurrentMonth = viewMonth === realTodayM && viewYear === realTodayY;
+  const monthBirthdays = upcomingBirthdays.filter(b => b.month === viewMonth);
+  const birthdayDaySet = new Set(monthBirthdays.map(b => b.day));
+
+  // Next upcoming birthday (soonest from today) — shown in the header
+  const nextBirthday = (() => {
+    const todayMs = new Date(realTodayY, realTodayM, realTodayD).getTime();
+    let best: { emp: Employee; month: number; day: number; daysUntil: number } | null = null;
+    for (const b of upcomingBirthdays) {
+      let nextMs = new Date(realTodayY, b.month, b.day).getTime();
+      if (nextMs <= todayMs) nextMs = new Date(realTodayY + 1, b.month, b.day).getTime();
+      const daysUntil = Math.round((nextMs - todayMs) / 86400000);
+      if (!best || daysUntil < best.daysUntil) best = { emp: b.emp, month: b.month, day: b.day, daysUntil };
+    }
+    return best;
+  })();
 
   const resetForm = () => {
     setFormData({ status: 'Active', role: 'Staff' });
@@ -187,7 +239,10 @@ export const Employees: React.FC = () => {
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <h1 className="text-3xl font-bold tracking-tight">Employee Management</h1>
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900">Employee Management</h1>
+          <p className="text-sm text-slate-400 mt-0.5">Manage your team, roles, and upcoming birthdays</p>
+        </div>
       </div>
 
       <Tabs defaultValue="employees" className="w-full">
@@ -197,68 +252,88 @@ export const Employees: React.FC = () => {
         </TabsList>
         
         {/* Employees Tab */}
-        <TabsContent value="employees" className="space-y-4 mt-4">
-          <div className="flex justify-end">
-            <Button onClick={handleOpenAdd} className="w-full sm:w-auto bg-blue-900 hover:bg-blue-800">
-              <Plus className="mr-2 h-4 w-4" /> Add Employee
-            </Button>
-          </div>
-
-          <Card>
-            <CardHeader>
-              <div className="relative">
-                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-500" />
-                <Input
-                  className="pl-9"
-                  placeholder="Search by Name or ID..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                />
+        <TabsContent value="employees" className="mt-4">
+          <div className="flex gap-4 items-start">
+          {/* Left: employee table (70%) */}
+          <div className="w-[70%] min-w-0 space-y-4">
+          <Card className="overflow-hidden">
+            <CardHeader className="border-b border-slate-100">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                <span className="inline-flex items-center rounded-lg text-xs font-semibold px-3 py-1.5 shrink-0 self-start sm:self-auto" style={{ background: '#f1f5f9', color: '#475569' }}>
+                  {filteredEmployees.length} Employees
+                </span>
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                  <Input
+                    className="pl-9 bg-slate-50 border-slate-200"
+                    placeholder="Search by name or ID..."
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                  />
+                </div>
+                <Button onClick={handleOpenAdd} className="shrink-0 bg-blue-900 hover:bg-blue-800">
+                  <Plus className="mr-2 h-4 w-4" /> Add Employee
+                </Button>
               </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="p-0">
               <Table>
                 <TableHeader>
-                  <TableRow>
-                    <TableHead>EID</TableHead>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Role</TableHead>
-                    <TableHead>Position</TableHead>
-                    <TableHead>Date of Birth</TableHead>
-                    <TableHead>Joining Date</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
+                  <TableRow className="hover:bg-transparent border-slate-100">
+                    <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold pl-6 pr-2 py-3">#</TableHead>
+                    <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold px-3 py-3">EID</TableHead>
+                    <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold px-3 py-3">Name</TableHead>
+                    <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold px-3 py-3">Role</TableHead>
+                    <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold px-3 py-3">Position</TableHead>
+                    <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold px-3 py-3">Date of Birth</TableHead>
+                    <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold px-3 py-3">Joining Date</TableHead>
+                    <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold px-3 py-3">Status</TableHead>
+                    <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold text-right pl-4 pr-6 py-3">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {filteredEmployees.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="text-center h-24 text-gray-500">
+                      <TableCell colSpan={9} className="text-center h-24 text-slate-400">
                         No employees found.
                       </TableCell>
                     </TableRow>
                   ) : (
-                    filteredEmployees.map((emp) => (
-                      <TableRow key={emp.id}>
-                        <TableCell className="font-medium">{emp.eid}</TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-900">
-                              <User size={14} />
+                    filteredEmployees.map((emp, index) => {
+                      const rb = roleBadge(emp.role);
+                      return (
+                      <TableRow key={emp.id} className="border-slate-100 hover:bg-slate-50 transition-colors">
+                        <TableCell className="pl-6 pr-2 py-3.5 text-sm font-medium text-slate-500 tabular-nums">{index + 1}</TableCell>
+                        <TableCell className="px-3 py-3.5">
+                          <span className="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold font-mono" style={{ background: '#eff6ff', color: '#1d4ed8' }}>{emp.eid}</span>
+                        </TableCell>
+                        <TableCell className="px-3 py-3.5">
+                          <div className="flex items-center gap-3">
+                            <div className="rounded-full flex items-center justify-center text-sm font-semibold" style={{ width: '36px', height: '36px', minWidth: '36px', flexShrink: 0, background: '#f8fafc', border: '1px solid #e2e8f0', color: '#475569' }}>
+                              {emp.name.charAt(0).toUpperCase()}
                             </div>
-                            {emp.name}
+                            <span className="font-medium text-slate-800 whitespace-nowrap">{emp.name}</span>
                           </div>
                         </TableCell>
-                        <TableCell>{emp.role}</TableCell>
-                        <TableCell>{emp.designation || '—'}</TableCell>
-                        <TableCell>{new Date(emp.dob).toLocaleDateString()}</TableCell>
-                        <TableCell>{emp.joiningDate ? new Date(emp.joiningDate).toLocaleDateString() : '-'}</TableCell>
-                        <TableCell>
-                          <Badge variant={emp.status === 'Active' ? 'default' : 'destructive'}>
-                            {emp.status}
-                          </Badge>
+                        <TableCell className="px-3 py-3.5">
+                          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap" style={{ background: rb.bg, color: rb.fg }}>
+                            {emp.role}
+                          </span>
                         </TableCell>
-                        <TableCell className="text-right">
+                        <TableCell className="px-3 py-3.5">
+                          {emp.designation
+                            ? <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-600">{emp.designation}</span>
+                            : <span className="text-slate-300">—</span>}
+                        </TableCell>
+                        <TableCell className="text-sm text-slate-600 tabular-nums whitespace-nowrap px-3 py-3.5">{new Date(emp.dob).toLocaleDateString()}</TableCell>
+                        <TableCell className="text-sm text-slate-600 tabular-nums whitespace-nowrap px-3 py-3.5">{emp.joiningDate ? new Date(emp.joiningDate).toLocaleDateString() : '—'}</TableCell>
+                        <TableCell className="px-3 py-3.5">
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap" style={emp.status === 'Active' ? { background: '#f0fdf4', color: '#16a34a' } : { background: '#fef2f2', color: '#dc2626' }}>
+                            <span className="h-1.5 w-1.5 rounded-full" style={{ background: emp.status === 'Active' ? '#16a34a' : '#dc2626' }} />
+                            {emp.status}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-right pl-4 pr-6 py-3.5">
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                               <Button variant="ghost" className="h-8 w-8 p-0">
@@ -282,12 +357,93 @@ export const Employees: React.FC = () => {
                           </DropdownMenu>
                         </TableCell>
                       </TableRow>
-                    ))
+                      );
+                    })
                   )}
                 </TableBody>
               </Table>
             </CardContent>
           </Card>
+          </div>
+
+          {/* Right: Upcoming Birthdays (30%) */}
+          <div className="w-[30%] shrink-0 self-start sticky top-4">
+            <Card>
+              <CardHeader style={{ padding: '10px 16px' }}>
+                <div className="flex items-center gap-1.5">
+                  <Cake className="h-4 w-4 text-amber-500" />
+                  <h3 className="font-bold text-sm text-slate-800">Birthdays</h3>
+                </div>
+                {nextBirthday && (
+                  <div className="flex items-center gap-1.5" style={{ marginTop: '8px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '8px', padding: '5px 10px' }} title={`Next: ${nextBirthday.emp.name} (${MONTH_ABBR[nextBirthday.month]} ${nextBirthday.day})`}>
+                    <Cake className="h-3.5 w-3.5" style={{ color: '#d97706', flexShrink: 0 }} />
+                    <span className="text-[10px] font-bold uppercase" style={{ color: '#b45309', flexShrink: 0 }}>Next</span>
+                    <span className="text-xs font-bold text-slate-800 truncate" style={{ minWidth: 0, flex: '1 1 0%' }}>{nextBirthday.emp.name}</span>
+                    <span className="text-xs font-bold tabular-nums" style={{ color: '#d97706', flexShrink: 0 }}>{MONTH_ABBR[nextBirthday.month]} {nextBirthday.day}</span>
+                  </div>
+                )}
+              </CardHeader>
+              <CardContent className="p-0">
+                {/* Month calendar with navigation */}
+                <div className="px-4 pt-3 pb-4 border-b border-slate-100">
+                  <div className="flex items-center justify-between mb-2">
+                    <button type="button" onClick={() => shiftMonth(-1)} aria-label="Previous month" className="h-7 w-7 flex items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 transition-colors">
+                      <ChevronLeft className="h-4 w-4" />
+                    </button>
+                    <span className="text-sm font-bold text-slate-800">{calMonthName} {viewYear}</span>
+                    <button type="button" onClick={() => shiftMonth(1)} aria-label="Next month" className="h-7 w-7 flex items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 transition-colors">
+                      <ChevronRight className="h-4 w-4" />
+                    </button>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '2px', textAlign: 'center' }}>
+                    {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => (
+                      <div key={'w' + i} className="text-[10px] font-semibold text-slate-400 py-1">{d}</div>
+                    ))}
+                    {Array.from({ length: calFirstWeekday }).map((_, i) => <div key={'blank' + i} />)}
+                    {Array.from({ length: calDaysInMonth }).map((_, i) => {
+                      const dayNum = i + 1;
+                      const isToday = isViewingCurrentMonth && dayNum === realTodayD;
+                      const hasBday = birthdayDaySet.has(dayNum);
+                      const base: React.CSSProperties = { width: '28px', height: '28px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: '9999px', fontSize: '12px' };
+                      const cellStyle: React.CSSProperties = isToday
+                        ? { ...base, background: '#1d4ed8', color: '#fff', fontWeight: 700 }
+                        : hasBday
+                        ? { ...base, background: '#dbeafe', color: '#1d4ed8', fontWeight: 700 }
+                        : { ...base, color: '#334155' };
+                      return (
+                        <div key={dayNum} className="flex items-center justify-center" style={{ height: '30px', position: 'relative' }}>
+                          <span style={cellStyle}>{dayNum}</span>
+                          {hasBday && !isToday && <span style={{ position: 'absolute', bottom: '1px', width: '4px', height: '4px', borderRadius: '9999px', background: '#1d4ed8' }} />}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+                {/* Selected-month birthday list */}
+                <div className="flex items-center justify-between px-4 py-2 border-b border-slate-100 bg-slate-50 text-[10px] uppercase tracking-wide font-semibold text-slate-400">
+                  <span>{calMonthName} Birthdays</span>
+                  <span>{monthBirthdays.length}</span>
+                </div>
+                {monthBirthdays.length === 0 ? (
+                  <p className="px-4 py-8 text-center text-xs text-slate-400">No birthdays in {calMonthName}.</p>
+                ) : (
+                  <div className="max-h-[280px] overflow-y-auto">
+                    {monthBirthdays.map(({ emp, month, day }, i) => (
+                      <div key={emp.id} className="flex items-center gap-2 px-4 py-2 border-b border-slate-50 transition-colors hover:bg-slate-50">
+                        <span className="text-xs font-medium text-slate-400 tabular-nums" style={{ width: '22px', flexShrink: 0 }}>{i + 1}</span>
+                        <div className="min-w-0 flex-1 flex items-center gap-1.5">
+                          {isViewingCurrentMonth && <Cake className="h-3.5 w-3.5" style={{ color: '#1d4ed8', flexShrink: 0 }} />}
+                          <span className="font-semibold text-[13px] text-slate-800 truncate">{emp.name}</span>
+                        </div>
+                        <span className="text-xs font-bold tabular-nums whitespace-nowrap" style={{ color: '#1d4ed8', flexShrink: 0 }}>{MONTH_ABBR[month]} {day}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+          </div>
         </TabsContent>
 
         {/* Signatures Tab */}
@@ -455,60 +611,51 @@ export const Employees: React.FC = () => {
       </Dialog>
 
       <Dialog open={isViewOpen} onOpenChange={setIsViewOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Employee Details</DialogTitle>
-            <DialogDescription>
-              Information about {viewingEmployee?.name}
-            </DialogDescription>
-          </DialogHeader>
+        <DialogContent className="rounded-2xl" style={{ maxWidth: '480px', padding: 0, overflow: 'hidden' }}>
+          <DialogTitle className="sr-only">Employee Details</DialogTitle>
+          <DialogDescription className="sr-only">Information about {viewingEmployee?.name}</DialogDescription>
           {viewingEmployee && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label className="text-muted-foreground">Full Name</Label>
-                  <div className="font-medium">{viewingEmployee.name}</div>
-                </div>
-                <div>
-                  <Label className="text-muted-foreground">Employee ID</Label>
-                  <div className="font-medium">{viewingEmployee.eid}</div>
-                </div>
-                <div>
-                  <Label className="text-muted-foreground">Role</Label>
-                  <div className="font-medium">{viewingEmployee.role}</div>
-                </div>
-                <div>
-                  <Label className="text-muted-foreground">Position</Label>
-                  <div className="font-medium">{viewingEmployee.designation || '—'}</div>
-                </div>
-                <div>
-                  <Label className="text-muted-foreground">Date of Birth</Label>
-                  <div className="font-medium">{new Date(viewingEmployee.dob).toLocaleDateString()}</div>
-                </div>
-                <div>
-                  <Label className="text-muted-foreground">Gender</Label>
-                  <div className="font-medium">{viewingEmployee.gender || 'Not Set'}</div>
-                </div>
-                <div>
-                  <Label className="text-muted-foreground">Joining Date</Label>
-                  <div className="font-medium">
-                    {viewingEmployee.joiningDate ? new Date(viewingEmployee.joiningDate).toLocaleDateString() : '-'}
+            <>
+              {/* Profile header */}
+              <div style={{ background: 'linear-gradient(135deg, #eff6ff 0%, #f5f3ff 100%)', padding: '24px 24px 20px', borderBottom: '1px solid #eef2f7' }}>
+                <div className="flex items-center gap-4">
+                  <div className="rounded-full flex items-center justify-center text-xl font-bold" style={{ width: '60px', height: '60px', minWidth: '60px', flexShrink: 0, background: '#ffffff', border: '1px solid #e2e8f0', color: '#1d4ed8', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
+                    {viewingEmployee.name.charAt(0).toUpperCase()}
                   </div>
-                </div>
-                <div>
-                  <Label className="text-muted-foreground">Status</Label>
-                  <div>
-                    <Badge variant={viewingEmployee.status === 'Active' ? 'default' : 'destructive'}>
-                      {viewingEmployee.status}
-                    </Badge>
+                  <div style={{ minWidth: 0 }}>
+                    <h2 className="text-lg font-bold text-slate-900 truncate">{viewingEmployee.name}</h2>
+                    <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                      <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold font-mono" style={{ background: '#ffffff', color: '#1d4ed8', border: '1px solid #dbeafe' }}>{viewingEmployee.eid}</span>
+                      <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold" style={{ background: roleBadge(viewingEmployee.role).bg, color: roleBadge(viewingEmployee.role).fg }}>{viewingEmployee.role}</span>
+                      <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold" style={viewingEmployee.status === 'Active' ? { background: '#f0fdf4', color: '#16a34a' } : { background: '#fef2f2', color: '#dc2626' }}>
+                        <span className="h-1.5 w-1.5 rounded-full" style={{ background: viewingEmployee.status === 'Active' ? '#16a34a' : '#dc2626' }} />
+                        {viewingEmployee.status}
+                      </span>
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
+
+              {/* Details grid */}
+              <div className="px-6 py-5 grid grid-cols-2 gap-x-6 gap-y-4">
+                {[
+                  { label: 'Position', value: viewingEmployee.designation || '—' },
+                  { label: 'Gender', value: viewingEmployee.gender || 'Not set' },
+                  { label: 'Date of Birth', value: new Date(viewingEmployee.dob).toLocaleDateString() },
+                  { label: 'Joining Date', value: viewingEmployee.joiningDate ? new Date(viewingEmployee.joiningDate).toLocaleDateString() : '—' },
+                ].map((f) => (
+                  <div key={f.label}>
+                    <p className="text-[11px] uppercase tracking-wide font-semibold text-slate-400">{f.label}</p>
+                    <p className="text-sm font-semibold text-slate-800 mt-0.5">{f.value}</p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="px-6 pb-5 flex justify-end">
+                <Button variant="outline" onClick={() => setIsViewOpen(false)}>Close</Button>
+              </div>
+            </>
           )}
-          <DialogFooter>
-             <Button variant="outline" onClick={() => setIsViewOpen(false)}>Close</Button>
-          </DialogFooter>
         </DialogContent>
       </Dialog>
 

@@ -77,7 +77,7 @@ export const StatusSymbol: React.FC<{ status: AttendanceStatus; className?: stri
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
-import { Folder, Plus, FileText, Clock, Trash2, ChevronRight, EyeOff, CalendarDays, CalendarCheck, CheckCircle2 } from 'lucide-react';
+import { Folder, Plus, FileText, Clock, Trash2, ChevronRight, EyeOff, CalendarDays, CalendarCheck, CheckCircle2, Cake } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger, DialogFooter } from '../components/ui/dialog';
 import { Checkbox } from '../components/ui/checkbox';
@@ -124,6 +124,21 @@ function getWorkingDayPath(from: Date, count: number): Date[] {
   }
   return days;
 }
+
+// Firework bursts for the birthday celebration (generated once, stable across renders)
+const FIREWORK_COLORS = ['#f43f5e', '#f59e0b', '#10b981', '#3b82f6', '#a855f7', '#ec4899', '#eab308', '#22d3ee'];
+const FIREWORKS = Array.from({ length: 7 }, (_, i) => ({
+  left: 8 + Math.random() * 82,
+  top: 12 + Math.random() * 55,
+  color: FIREWORK_COLORS[i % FIREWORK_COLORS.length],
+  delay: Math.random() * 4.5,
+  duration: 1.8 + Math.random() * 1.4,
+  sparks: Array.from({ length: 14 }, (_, j) => {
+    const angle = (j / 14) * Math.PI * 2;
+    const radius = 46 + Math.random() * 40;
+    return { tx: Math.round(Math.cos(angle) * radius), ty: Math.round(Math.sin(angle) * radius) };
+  }),
+}));
 
 export const Dashboard: React.FC = () => {
   const navigate = useNavigate();
@@ -278,8 +293,43 @@ export const Dashboard: React.FC = () => {
 
   const selectedFolder = folders.find(f => f.id === selectedFolderId);
 
+  const [confettiOn, setConfettiOn] = useState(true);
+
+  // Employees whose birthday is TODAY (auto-clears the next day)
+  const _bdayNow = new Date();
+  const todaysBirthdays = employees.filter(e => {
+    if (e.status !== 'Active' || !e.dob) return false;
+    const bd = new Date(e.dob);
+    return !isNaN(bd.getTime()) && bd.getMonth() === _bdayNow.getMonth() && bd.getDate() === _bdayNow.getDate();
+  });
+  const _bdayNames = todaysBirthdays.map(e => e.name);
+  const bdayText = _bdayNames.length <= 1
+    ? _bdayNames[0]
+    : _bdayNames.slice(0, -1).join(', ') + ' & ' + _bdayNames[_bdayNames.length - 1];
+
   return (
-    <div className="space-y-8">
+    <div className="space-y-8" style={{ position: 'relative', zIndex: 0 }}>
+      {/* 🎉 Birthday confetti overlay — pure CSS, only while it's someone's birthday */}
+      {todaysBirthdays.length > 0 && confettiOn && (
+        <div className="confetti-container" aria-hidden="true">
+          {FIREWORKS.map((fw, i) => (
+            <div key={i} className="firework" style={{ left: `${fw.left}%`, top: `${fw.top}%` }}>
+              {fw.sparks.map((s, j) => (
+                <span key={j} className="fw-spark" style={{
+                  background: fw.color,
+                  color: fw.color,
+                  animationDelay: `${fw.delay}s`,
+                  animationDuration: `${fw.duration}s`,
+                  '--tx': `${s.tx}px`,
+                  '--ty': `${s.ty}px`,
+                } as React.CSSProperties} />
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+      {/* content layer sits above the confetti */}
+      <div style={{ position: 'relative', zIndex: 1 }}>
       <div className="flex flex-col md:flex-row justify-between items-start gap-4">
         <div>
           <h1 className="text-3xl font-bold tracking-tight mb-2">Dashboard</h1>
@@ -415,8 +465,10 @@ export const Dashboard: React.FC = () => {
 
       {/* Main Content Sections */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {/* Left column: Folders + birthday banner */}
+        <div className="md:col-span-1 space-y-6">
         {/* Folders List */}
-        <Card className="md:col-span-1 h-fit">
+        <Card className="h-fit">
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
               <CardTitle>Folders</CardTitle>
@@ -551,6 +603,22 @@ export const Dashboard: React.FC = () => {
              ))}
           </CardContent>
         </Card>
+
+        {/* 🎂 Happy Birthday — below Folders */}
+        {todaysBirthdays.length > 0 && (
+          <div
+            onDoubleClick={() => setConfettiOn(v => !v)}
+            title={confettiOn ? 'Double-click to stop the confetti' : 'Double-click to start the confetti'}
+            style={{ display: 'flex', alignItems: 'center', gap: '10px', borderRadius: '12px', padding: '14px 16px', background: '#fff7ed', border: '1px solid #fed7aa', cursor: 'pointer', userSelect: 'none' }}
+          >
+            <Cake style={{ width: '22px', height: '22px', flexShrink: 0, color: '#ea580c' }} />
+            <div style={{ minWidth: 0 }}>
+              <p className="font-bold text-sm" style={{ color: '#9a3412' }}>Happy Birthday, {bdayText}! 🎉</p>
+              <p className="text-xs" style={{ color: '#c2410c' }}>Wishing you a wonderful day 🎂</p>
+            </div>
+          </div>
+        )}
+        </div>
 
         {/* Folder Contents */}
         <Card className="md:col-span-2 min-h-[400px]">
@@ -713,6 +781,7 @@ export const Dashboard: React.FC = () => {
             )}
           </CardContent>
         </Card>
+      </div>
       </div>
       <AlertDialog open={!!folderToDelete} onOpenChange={() => setFolderToDelete(null)}>
         <AlertDialogContent>
