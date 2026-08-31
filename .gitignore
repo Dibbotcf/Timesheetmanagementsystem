@@ -16,3 +16,6 @@ coverage
 *.zip
 *zkt-device-config.json
 *zkt-time-overrides.json
+
+# Playwright MCP session artifacts (snapshots, screenshots)
+.playwright-mcp/
