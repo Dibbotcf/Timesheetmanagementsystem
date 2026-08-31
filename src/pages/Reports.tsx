@@ -42,51 +42,45 @@ export const Reports: React.FC = () => {
     .filter(e => e.status === 'Active')
     .sort((a, b) => a.eid.localeCompare(b.eid, undefined, { numeric: true, sensitivity: 'base' }));
 
-  // Safe helper to count leave days for a specific employee in the selected month
+  // Safe helper to count leave days for a specific employee in the selected month.
+  // Mirrors TimesheetView's leaveSummary: it uses the stored `days` (the working-day count
+  // computed at leave creation, with weekly/public holidays already excluded) pro-rated by the
+  // leave's overlap with this month. Counting raw calendar days here made a 27-30 Aug leave
+  // read as 4 days when 28-29 were weekly holidays, disagreeing with the timesheet's 2.
   const getApprovedLeaveDaysForMonth = (employeeId: string, year: number, month: number) => {
+    const MS = 24 * 60 * 60 * 1000;
+    const monthStart = new Date(year, month - 1, 1).getTime();
+    const monthEnd = new Date(year, month, 0).getTime();
+
+    const parseLocal = (s: string) => {
+      const [y, m, d] = s.split('-').map(Number);
+      if (!y || !m || !d) return NaN;
+      return new Date(y, m - 1, d).getTime();
+    };
+
     let total = 0;
     const approvedLeaves = leaves.filter(l => l.employeeId === employeeId && l.status === 'Approved');
 
     for (const leave of approvedLeaves) {
-      // Exclude partial or hourly leaves (where partialHours is set/greater than 0 or days is 0)
+      // Exclude partial/hourly leaves (they never consume a leave day)
       if (leave.partialHours && leave.partialHours > 0) continue;
-      if (leave.days === 0) continue;
+      if (!leave.days) continue;
 
-      const startParts = leave.startDate.split('-');
-      const endParts = leave.endDate.split('-');
-      if (startParts.length < 3 || endParts.length < 3) continue;
+      const leaveStart = parseLocal(leave.startDate);
+      const leaveEnd = parseLocal(leave.endDate);
+      if (isNaN(leaveStart) || isNaN(leaveEnd)) continue;
+      if (leaveEnd < monthStart || leaveStart > monthEnd) continue;
 
-      const sYear = parseInt(startParts[0], 10);
-      const sMonth = parseInt(startParts[1], 10);
-      const sDay = parseInt(startParts[2], 10);
-
-      const eYear = parseInt(endParts[0], 10);
-      const eMonth = parseInt(endParts[1], 10);
-      const eDay = parseInt(endParts[2], 10);
-
-      // Handle half-day leaves specifically
-      if (leave.days === 0.5) {
-        if (sYear === year && sMonth === month) {
-          total += 0.5;
-        }
-        continue;
-      }
-
-      // Handle full or multi-day leaves day-by-day to cleanly count days in target month
-      const startDateObj = new Date(sYear, sMonth - 1, sDay);
-      const endDateObj = new Date(eYear, eMonth - 1, eDay);
-
-      let current = new Date(startDateObj);
-      while (current <= endDateObj) {
-        const curYear = current.getFullYear();
-        const curMonth = current.getMonth() + 1; // 1-indexed
-        if (curYear === year && curMonth === month) {
-          total += 1.0;
-        }
-        current.setDate(current.getDate() + 1);
-      }
+      // Pro-rate the stored working-day count over the part of the leave falling in this month
+      const overlapStart = Math.max(leaveStart, monthStart);
+      const overlapEnd = Math.min(leaveEnd, monthEnd);
+      const totalDays = Math.round((leaveEnd - leaveStart) / MS) + 1;
+      const overlapDays = Math.round((overlapEnd - overlapStart) / MS) + 1;
+      total += totalDays > 0 ? (leave.days * overlapDays) / totalDays : 0;
     }
-    return total;
+
+    // Trim float drift (e.g. 2.4999999999) before it reaches the deduction rule
+    return Math.round(total * 100) / 100;
   };
 
   // Days in month calculation
@@ -105,7 +99,7 @@ export const Reports: React.FC = () => {
   // Deduction calculation logic based on rules
   const getDeduction = (leaveDays: number) => {
     if (leaveDays <= 1) return 0;
-    return leaveDays * 30;
+    return Math.round(leaveDays * 30);
   };
 
   // Download PDF Action
@@ -176,7 +170,7 @@ export const Reports: React.FC = () => {
 
   const totals = reportRows.reduce(
     (acc, curr) => {
-      acc.leaveDays += curr.leaveDays;
+      acc.leaveDays = Math.round((acc.leaveDays + curr.leaveDays) * 100) / 100;
       acc.allowance += curr.allowance;
       acc.deduction += curr.deduction;
       acc.payable += curr.payable;

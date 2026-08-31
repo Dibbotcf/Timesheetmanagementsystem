@@ -61,29 +61,44 @@ export const LateDelayReport: React.FC<Props> = ({ onBack }) => {
     };
   };
 
+  // Uses the stored `days` (working-day count, weekly/public holidays already excluded at leave
+  // creation) pro-rated by the leave's overlap with the selected month, matching TimesheetView's
+  // leaveSummary. Counting raw calendar days here overstated leaves that straddle a weekend.
   const getLeavesByType = (employeeId: string) => {
     const result = { casual: 0, sick: 0, earn: 0, other: 0 };
+    const MS = 24 * 60 * 60 * 1000;
+    const monthStart = new Date(selectedYear, selectedMonth - 1, 1).getTime();
+    const monthEnd   = new Date(selectedYear, selectedMonth, 0).getTime();
+
     for (const lv of leaves.filter(l => l.employeeId === employeeId && l.status === 'Approved')) {
-      if ((lv.partialHours && lv.partialHours > 0) || lv.days === 0) continue;
+      if ((lv.partialHours && lv.partialHours > 0) || !lv.days) continue;
       const sp = lv.startDate.split('-'), ep = lv.endDate.split('-');
       if (sp.length < 3 || ep.length < 3) continue;
+      // lv.type is the stored LeaveType ('Casual' | 'Sick' | 'Annual' | 'Maternity' | 'Other'),
+      // not a display label — matching on 'Casual Leave' etc. put every leave in `other`.
       const add = (days: number) => {
-        const t = lv.type ?? '';
-        if (t === 'Casual Leave') result.casual += days;
-        else if (t === 'Sick Leave') result.sick += days;
-        else if (t === 'Earn Leave' || t === 'Annual Leave') result.earn += days;
-        else result.other += days;
+        switch (lv.type) {
+          case 'Casual': result.casual += days; break;
+          case 'Sick':   result.sick   += days; break;
+          case 'Annual': result.earn   += days; break; // Earn Leave = Annual
+          default:       result.other  += days; break;
+        }
       };
-      if (lv.days === 0.5) {
-        if (+sp[0] === selectedYear && +sp[1] === selectedMonth) add(0.5);
-        continue;
-      }
-      const start = new Date(+sp[0], +sp[1] - 1, +sp[2]);
-      const end   = new Date(+ep[0], +ep[1] - 1, +ep[2]);
-      for (let c = new Date(start); c <= end; c.setDate(c.getDate() + 1))
-        if (c.getFullYear() === selectedYear && c.getMonth() + 1 === selectedMonth) add(1);
+
+      const leaveStart = new Date(+sp[0], +sp[1] - 1, +sp[2]).getTime();
+      const leaveEnd   = new Date(+ep[0], +ep[1] - 1, +ep[2]).getTime();
+      if (leaveEnd < monthStart || leaveStart > monthEnd) continue;
+
+      const overlapStart = Math.max(leaveStart, monthStart);
+      const overlapEnd   = Math.min(leaveEnd, monthEnd);
+      const totalDays    = Math.round((leaveEnd - leaveStart) / MS) + 1;
+      const overlapDays  = Math.round((overlapEnd - overlapStart) / MS) + 1;
+      if (totalDays > 0) add((lv.days * overlapDays) / totalDays);
     }
-    return result;
+
+    // Trim float drift from the pro-rata division
+    const trim = (n: number) => Math.round(n * 100) / 100;
+    return { casual: trim(result.casual), sick: trim(result.sick), earn: trim(result.earn), other: trim(result.other) };
   };
 
   const rows = useMemo(() =>
