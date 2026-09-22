@@ -1378,7 +1378,7 @@ export const LeaveManagement: React.FC = () => {
                                                                             onClick={() => updateLeave(leave.id, { hardCopyCollected: true })}
                                                                             style={{ fontSize: '10px', color: '#374151', background: 'transparent', border: '1px solid #d1d5db', borderRadius: '5px', padding: '1px 6px', cursor: 'pointer' }}
                                                                         >
-                                                                            Mark received
+                                                                            Confirm By HR
                                                                         </button>
                                                                     )}
                                                                 </>

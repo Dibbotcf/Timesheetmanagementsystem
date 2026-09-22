@@ -237,7 +237,7 @@ export const LeaveApprovalsView: React.FC<Props> = ({ leaves, employees, templat
                               <Pill bg={st.bg} fg={st.fg} bd={st.bd} upper>{st.label}</Pill>
                               {/* One next step per row: collect the form first, then approve */}
                               {needsDoc && !l.hardCopyCollected ? (
-                                <OutlineBtn onClick={() => updateLeave(l.id, { hardCopyCollected: true })} title="Signed form received">Mark received</OutlineBtn>
+                                <OutlineBtn onClick={() => updateLeave(l.id, { hardCopyCollected: true })} title="Confirm the signed form has reached HR">Confirm By HR</OutlineBtn>
                               ) : isPending && canApprove ? (
                                 <OutlineBtn color="#15803d" title="Approve" onClick={() => { updateLeave(l.id, { status: 'Approved' }); toast.success(`Leave approved for ${emp?.name}`); }}>
                                   <Check style={{ width: 14, height: 14 }} /> Approve
