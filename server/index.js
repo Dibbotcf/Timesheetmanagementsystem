@@ -23,7 +23,7 @@ const multer = require('multer');
 
 // Middleware
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '25mb' })); // leave evidence uploads (images/PDFs) travel as base64 JSON
 
 // --- Download Routes ---
 
@@ -342,16 +342,13 @@ app.post('/api/restore', async (req, res) => {
     try {
         await connection.beginTransaction();
 
-        // Truncate/Clear KV Store? Or selective replace?
-        // Original logic: "if currentItems.length > 0 ... delete ... then set"
-        // Here we can just clear table or better, allow selective.
-        // For simplicity and safety of a full restore: Clear Table
-        await connection.query('TRUNCATE TABLE kv_store');
-
+        // Replace only the collections the backup contains. Types that are never backed up
+        // (attendance, issues, leave_files evidence blobs) must survive a restore.
         const insertQuery = 'INSERT INTO kv_store (`key`, `value`) VALUES (?, ?)';
 
         for (const [collectionName, items] of Object.entries(data)) {
             if (Array.isArray(items)) {
+                await connection.query('DELETE FROM kv_store WHERE `key` LIKE ?', [`${collectionName}:%`]);
                 for (const item of items) {
                     if (item.id) {
                         const key = `${collectionName}:${item.id}`;

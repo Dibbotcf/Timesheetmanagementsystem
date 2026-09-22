@@ -550,11 +550,14 @@ if ($parts[0] === 'restore' && $method === 'POST') {
     global $pdo;
     $pdo->beginTransaction();
     try {
-        $pdo->exec("TRUNCATE TABLE kv_store");
+        // Replace only the collections the backup contains — types that are never backed up
+        // (attendance, issues, leave_files evidence blobs) must survive a restore.
         $stmt = $pdo->prepare("INSERT INTO kv_store (`key`, `value`) VALUES (?, ?)");
+        $del  = $pdo->prepare("DELETE FROM kv_store WHERE `key` LIKE ?");
         
         foreach ($data as $colName => $items) {
             if (is_array($items)) {
+                $del->execute(["$colName:%"]);
                 foreach ($items as $item) {
                     if (isset($item['id'])) {
                         $key = "$colName:{$item['id']}";

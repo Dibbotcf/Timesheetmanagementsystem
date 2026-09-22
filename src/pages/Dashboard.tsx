@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '../App';
 import { isTimesheetComplete, isMonthOver } from '../lib/timesheetStatus';
+import { getWorkingDayPath, getHardCopyDeadlineDays, hardCopyBaseDate } from '../lib/leaveDays';
 
 // --- Custom Status SVGs (matching premium SVGRepo styling) ---
 const PresentIcon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -95,35 +96,6 @@ import {
 import { toast } from 'sonner@2.0.3';
 import { Badge } from '../components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
-
-function addWorkingDays(from: Date, days: number): Date {
-  let count = 0;
-  const d = new Date(from);
-  while (count < days) {
-    d.setDate(d.getDate() + 1);
-    const dow = d.getDay();
-    if (dow !== 0 && dow !== 6) count++;
-  }
-  return d;
-}
-
-function getHardCopyDeadlineDays(type: string, isPartial: boolean): number | null {
-  if (type === 'Sick') return 5;
-  if (type === 'Casual' || type === 'Annual') return 2;
-  if (type === 'Other' && !isPartial) return 2;
-  return null;
-}
-
-function getWorkingDayPath(from: Date, count: number): Date[] {
-  const days: Date[] = [];
-  const d = new Date(from);
-  while (days.length < count) {
-    d.setDate(d.getDate() + 1);
-    const dow = d.getDay();
-    if (dow !== 0 && dow !== 6) days.push(new Date(d));
-  }
-  return days;
-}
 
 // Firework bursts for the birthday celebration (generated once, stable across renders)
 const FIREWORK_COLORS = ['#f43f5e', '#f59e0b', '#10b981', '#3b82f6', '#a855f7', '#ec4899', '#eab308', '#22d3ee'];
@@ -405,8 +377,8 @@ export const Dashboard: React.FC = () => {
             {myLeaves.slice(0, 5).map(leave => {
               const typeColor = leave.type === 'Sick' ? '#ef4444' : leave.type === 'Casual' ? '#6366f1' : leave.type === 'Annual' ? '#0ea5e9' : leave.type === 'Maternity' ? '#ec4899' : '#8b5cf6';
               const deadlineDays = getHardCopyDeadlineDays(leave.type, !!leave.partialHours);
-              const appliedDate = leave.createdAt ? new Date(leave.createdAt) : new Date(leave.startDate);
-              const workingDays = deadlineDays ? getWorkingDayPath(appliedDate, deadlineDays) : [];
+              const appliedDate = hardCopyBaseDate(leave);
+              const workingDays = deadlineDays ? getWorkingDayPath(appliedDate, deadlineDays, templates) : [];
               const todayMid = new Date(); todayMid.setHours(0, 0, 0, 0);
               const deadline = workingDays.length > 0 ? workingDays[workingDays.length - 1] : null;
               const deadlineNorm = deadline ? new Date(deadline) : null;

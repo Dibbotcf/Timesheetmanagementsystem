@@ -11,6 +11,7 @@ import { io } from 'socket.io-client';
 // Pages
 import { Dashboard } from './pages/Dashboard';
 import { TimesheetView } from './pages/TimesheetView';
+import { LeaveRequestFormPage } from './components/LeaveRequestForm';
 import { Backups } from './pages/Backups';
 import { LoginScreen } from './components/LoginScreen';
 import { Timesheet } from './pages/Timesheet';
@@ -71,6 +72,7 @@ export interface LeaveFolder {
   id: string;
   name: string;
   createdAt: string;
+  month?: string; // "YYYY-MM" when the folder represents a calendar month
 }
 
 export interface SavedReport {
@@ -191,6 +193,20 @@ export interface LeaveRecord {
   status: 'Pending' | 'Approved' | 'Rejected';
   createdAt?: string;
   hardCopyCollected?: boolean;
+  casualCriteria?: number; // 1-12, row number on the paper Leave Request Form. Only set on Casual leaves recorded after Sep 2026.
+  attachments?: LeaveAttachment[]; // evidence metadata; file content lives in `leave_files:{id}` and is fetched on demand
+}
+
+export type LeaveAttachmentKind = 'signed_form' | 'supporting_doc';
+
+export interface LeaveAttachment {
+  id: string;
+  kind: LeaveAttachmentKind;
+  name: string;
+  mime: string;
+  size: number;      // bytes of the stored (compressed) file
+  uploadedAt: string;
+  uploadedBy?: string;
 }
 
 export type LeaveRequest = Omit<LeaveRecord, 'id'>;
@@ -266,7 +282,7 @@ interface AppContextType {
   addSignature: (sig: Omit<Signature, 'id'>) => void;
   deleteSignature: (id: string) => void;
 
-  addLeave: (leave: LeaveRequest) => void;
+  addLeave: (leave: LeaveRequest & { id?: string }) => Promise<LeaveRecord | null>;
   updateLeave: (id: string, data: Partial<LeaveRecord>) => void;
   deleteLeave: (id: string) => void;
 
@@ -758,11 +774,15 @@ export default function App() {
     }
   };
 
-  const addLeave = async (leaveData: LeaveRequest) => {
-    const newLeave: LeaveRecord = { ...leaveData, id: Math.random().toString(36).substr(2, 9), createdAt: new Date().toISOString() };
+  const addLeave = async (leaveData: LeaveRequest & { id?: string }) => {
+    // Caller may supply the id when it has already linked files (evidence) to it
+    const newLeave: LeaveRecord = { ...leaveData, id: leaveData.id || Math.random().toString(36).substr(2, 9), createdAt: new Date().toISOString() };
     if (await saveItem('leaves', newLeave)) {
-      setLeaves([...leaves, newLeave]);
+      // The socket broadcast for this save may land before we get here — never add it twice
+      setLeaves(prev => prev.some(l => l.id === newLeave.id) ? prev.map(l => l.id === newLeave.id ? newLeave : l) : [...prev, newLeave]);
+      return newLeave;
     }
+    return null;
   };
 
   const deleteLeave = async (id: string) => {
@@ -912,6 +932,7 @@ export default function App() {
               <Route path="/attendance" element={<Attendance />} />
               {/* Staff-accessible pages */}
               <Route path="/timesheet/:id/view" element={<TimesheetView />} />
+              <Route path="/leave/:id/view" element={<LeaveRequestFormPage />} />
               <Route path="/templates" element={<Templates />} />
               <Route path="/leaves" element={<LeaveManagement />} />
               <Route path="/overtime" element={<OTManagement />} />

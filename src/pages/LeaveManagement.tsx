@@ -7,68 +7,19 @@ import { Textarea } from '../components/ui/textarea';
 import { Badge } from '../components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from '../components/ui/dialog';
 import { Popover, PopoverContent, PopoverTrigger } from '../components/ui/popover';
-import { Calendar as CalendarIcon, Plus, Trash2, User, AlertCircle, Settings, RefreshCw, LayoutList, UserSquare2, History, ArrowRightLeft, Folder, Save, File, Download, Eye, X, Check, ChevronsUpDown } from 'lucide-react';
+import { Calendar as CalendarIcon, Plus, Trash2, User, AlertCircle, Settings, RefreshCw, LayoutList, UserSquare2, History, ArrowRightLeft, Folder, Save, File, Download, Eye, X, Check, ChevronsUpDown, Paperclip, FileText, Loader2 } from 'lucide-react';
 import { Checkbox } from '../components/ui/checkbox';
-import { useAppStore, LeaveType, LeaveRequest, Employee, SavedLeaveReport } from '../App';
+import { useAppStore, LeaveType, LeaveRequest, LeaveRecord, Employee, SavedLeaveReport } from '../App';
 import { toast } from 'sonner@2.0.3';
 import { format, differenceInDays, parseISO, addYears, differenceInYears } from 'date-fns';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '../components/ui/command';
-
-// --- Hard Copy Deadline Helpers ---
-function addWorkingDays(from: Date, days: number): Date {
-  let count = 0;
-  const d = new Date(from);
-  while (count < days) {
-    d.setDate(d.getDate() + 1);
-    const dow = d.getDay();
-    if (dow !== 0 && dow !== 6) count++;
-  }
-  return d;
-}
-
-function getHardCopyDeadlineDays(type: LeaveType, isPartial: boolean): number | null {
-  if (type === 'Sick') return 5;
-  if (type === 'Casual' || type === 'Annual') return 2;
-  if (type === 'Other' && !isPartial) return 2;
-  return null; // Maternity or partial Other — not applicable
-}
-
-function countLeaveDays(startStr: string, endStr: string, templates: import('../App').MonthTemplate[]): { working: number; skipped: number; skippedReasons: string[] } {
-  const start = new Date(startStr + 'T00:00:00');
-  const end = new Date(endStr + 'T00:00:00');
-  let working = 0;
-  let skipped = 0;
-  const skippedReasons: string[] = [];
-  const cur = new Date(start);
-  while (cur <= end) {
-    const y = cur.getFullYear();
-    const m = cur.getMonth(); // 0-indexed
-    const d = cur.getDate();
-    const tpl = templates.find(t => t.year === y && t.month === m);
-    const holiday = tpl?.holidays.find(h => h.date === d);
-    if (holiday) {
-      skipped++;
-      if (!skippedReasons.includes(holiday.reason)) skippedReasons.push(holiday.reason);
-    } else {
-      working++;
-    }
-    cur.setDate(cur.getDate() + 1);
-  }
-  return { working, skipped, skippedReasons };
-}
-
-function getWorkingDayPath(from: Date, count: number): Date[] {
-  const days: Date[] = [];
-  const d = new Date(from);
-  while (days.length < count) {
-    d.setDate(d.getDate() + 1);
-    const dow = d.getDay();
-    if (dow !== 0 && dow !== 6) days.push(new Date(d));
-  }
-  return days;
-}
+import { CASUAL_CRITERIA, CASUAL_CRITERIA_NOTE, getCasualCriterion } from '../lib/leaveCriteria';
+import { countLeaveDays, addWorkingDays, getWorkingDayPath, getHardCopyDeadlineDays, hardCopyBaseDate } from '../lib/leaveDays';
+import { LeaveRecordsView } from '../components/LeaveRecordsView';
+import { LeaveApprovalsView } from '../components/LeaveApprovalsView';
+import { uploadLeaveFile, deleteLeaveFile, formatBytes, MAX_FILE_BYTES } from '../utils/leaveFiles';
 
 // --- Leave Config Constants ---
 const LEAVE_LIMITS = {
@@ -78,6 +29,10 @@ const LEAVE_LIMITS = {
   Maternity: 120,
   Other: 9999 // Unlimited
 };
+
+const SELECTED_TYPE_COLOR = '#2563eb'; // single blue for the chosen tile, badge and confirm button
+// Words that usually mean the leave should be Sick, not Casual — used only for a soft warning
+const ILLNESS_WORDS = /\b(sick|ill|illness|fever|flu|cold|doctor|hospital|clinic|medical|medicine|headache|pain|unwell|surgery|injur)/i;
 
 export const LeaveManagement: React.FC = () => {
   const { employees, leaves, addLeave, updateLeave, deleteLeave, updateEmployee, deleteEmployee, currentUser, leaveFolders, addLeaveFolder, deleteLeaveFolder, savedLeaveReports, addSavedLeaveReport, deleteSavedLeaveReport, getItem, templates } = useAppStore();
@@ -104,6 +59,8 @@ export const LeaveManagement: React.FC = () => {
   
   // Report Viewing State
   const [viewReport, setViewReport] = useState<SavedLeaveReport | null>(null);
+  // Paper-style request form opens in its own tab (/leave/:id/view) so it can be printed/saved
+  const openLeaveForm = (leave: LeaveRecord) => window.open(`/leave/${leave.id}/view`, '_blank');
   
   // Initialize for Staff
   React.useEffect(() => {
@@ -113,8 +70,14 @@ export const LeaveManagement: React.FC = () => {
       }
   }, [isStaff, currentUser]);
   
-  // Form State
-  const [leaveType, setLeaveType] = useState<LeaveType>('Casual');
+  // Form State — no default type: the user must pick one explicitly (Casual used to be pre-selected and got submitted by mistake)
+  const [leaveType, setLeaveType] = useState<LeaveType | null>(null);
+  // Required for Casual leaves recorded from now on; older records have no criteria and are left as-is
+  const [casualCriteria, setCasualCriteria] = useState<number | null>(null);
+  // Sick leave must come with evidence (medical certificate / prescription) — PDF or image, max 5 MB
+  const [sickEvidence, setSickEvidence] = useState<File | null>(null);
+  const [isSubmittingLeave, setIsSubmittingLeave] = useState(false);
+  const sickEvidenceInputRef = React.useRef<HTMLInputElement>(null);
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [reason, setReason] = useState('');
@@ -282,9 +245,21 @@ export const LeaveManagement: React.FC = () => {
     toast.success("Leave limits updated successfully");
   };
 
-  const handleSubmitLeave = () => {
+  const handleSubmitLeave = async () => {
     // 1. Validate basic fields
-    if (!selectedEmployeeId || !leaveType || !reason) {
+    if (!leaveType) {
+      toast.error("Select a leave type first");
+      return;
+    }
+    if (leaveType === 'Casual' && !casualCriteria) {
+      toast.error("Select the casual leave criteria");
+      return;
+    }
+    if (leaveType === 'Sick' && !sickEvidence) {
+      toast.error("Attach the supporting document (PDF or image) for sick leave");
+      return;
+    }
+    if (!selectedEmployeeId || !reason) {
       toast.error("Please fill in all required fields (Type, Reason)");
       return;
     }
@@ -357,22 +332,46 @@ export const LeaveManagement: React.FC = () => {
       return;
     }
 
-    addLeave({
-      employeeId: selectedEmployeeId,
-      type: leaveType,
-      startDate: finalStartDate,
-      endDate: finalEndDate,
-      days,
-      partialHours: durationMode === 'partial' ? Number(partialHours) : undefined,
-      reason,
-      // Staff submits as Pending; Admin/HR records are auto-Approved
-      status: isStaff ? 'Pending' : 'Approved'
-    });
+    // The evidence file is linked to the leave id, so the id is fixed up front and the file goes up first.
+    const leaveId = Math.random().toString(36).substr(2, 9);
+    setIsSubmittingLeave(true);
+    let evidenceMeta: import('../App').LeaveAttachment | undefined;
+    try {
+      if (leaveType === 'Sick' && sickEvidence) {
+        const rec = await uploadLeaveFile({ leaveId, kind: 'supporting_doc', file: sickEvidence, uploadedBy: currentUser?.name });
+        evidenceMeta = { id: rec.id, kind: 'supporting_doc', name: rec.name, mime: rec.mime, size: rec.size, uploadedAt: rec.uploadedAt, uploadedBy: rec.uploadedBy };
+      }
+      const created = await addLeave({
+        id: leaveId,
+        employeeId: selectedEmployeeId,
+        type: leaveType,
+        startDate: finalStartDate,
+        endDate: finalEndDate,
+        days,
+        partialHours: durationMode === 'partial' ? Number(partialHours) : undefined,
+        reason,
+        casualCriteria: leaveType === 'Casual' && casualCriteria ? casualCriteria : undefined,
+        attachments: evidenceMeta ? [evidenceMeta] : undefined,
+        // Staff submits as Pending; Admin/HR records are auto-Approved
+        status: isStaff ? 'Pending' : 'Approved'
+      });
+      if (!created) {
+        if (evidenceMeta) await deleteLeaveFile(evidenceMeta.id); // don't leave an orphaned file behind
+        return;
+      }
+    } catch (err: any) {
+      toast.error(err?.message || 'Could not upload the supporting document');
+      return;
+    } finally {
+      setIsSubmittingLeave(false);
+    }
 
     toast.success("Leave recorded successfully");
     setIsAddDialogOpen(false);
     // Reset form
-    setLeaveType('Casual');
+    setLeaveType(null);
+    setCasualCriteria(null);
+    setSickEvidence(null);
     setStartDate('');
     setEndDate('');
     setReason('');
@@ -983,13 +982,13 @@ export const LeaveManagement: React.FC = () => {
                                         title="Clear to see all records"
                                     />
                                 </div>
-                                <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+                                <Dialog open={isAddDialogOpen} onOpenChange={(open) => { setIsAddDialogOpen(open); if (!open) { setLeaveType(null); setCasualCriteria(null); setSickEvidence(null); } }}>
                                     <DialogTrigger asChild>
                                         <Button className="bg-blue-600 hover:bg-blue-700">
                                             <Plus className="h-4 w-4 mr-2" /> Record Leave
                                         </Button>
                                     </DialogTrigger>
-                                <DialogContent className="max-w-md">
+                                <DialogContent className="max-w-lg" style={{ maxHeight: '92vh', overflowY: 'auto' }}>
                                 <DialogHeader>
                                     <DialogTitle>Record New Leave</DialogTitle>
                                     <DialogDescription>
@@ -998,29 +997,91 @@ export const LeaveManagement: React.FC = () => {
                                 </DialogHeader>
                                     <div className="space-y-4 py-4">
                                         <div className="space-y-2">
-                                            <label className="text-sm font-medium">Leave Type</label>
-                                            <Select value={leaveType} onValueChange={(v) => setLeaveType(v as LeaveType)}>
-                                                <SelectTrigger>
-                                                    <SelectValue />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    {Object.keys(LEAVE_LIMITS).map(type => (
-                                                        <SelectItem 
-                                                            key={type} 
-                                                            value={type}
-                                                            disabled={
-                                                                (selectedEmployee?.customLeaveLimits?.[type as LeaveType] === undefined) && (
-                                                                    (type === 'Maternity' && !currentStats.isEligibleForMaternity) ||
-                                                                    (type === 'Annual' && !currentStats.isEligibleForAnnual)
-                                                                )
-                                                            }
+                                            <label className="text-sm font-medium">
+                                                Leave Type <span style={{ color: '#ef4444' }}>*</span>
+                                                {!leaveType && <span style={{ marginLeft: '8px', fontSize: '12px', color: '#6b7280', fontWeight: 400 }}>— tap one to select</span>}
+                                            </label>
+                                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '8px' }}>
+                                                {(Object.keys(LEAVE_LIMITS) as LeaveType[]).map(type => {
+                                                    const hasCustomLimit = selectedEmployee?.customLeaveLimits?.[type] !== undefined;
+                                                    // Maternity is hidden entirely for non-female employees (same rule as the balance cards)
+                                                    if (type === 'Maternity' && !hasCustomLimit && !currentStats.isEligibleForMaternity) return null;
+                                                    const notEligible = !hasCustomLimit && type === 'Annual' && !currentStats.isEligibleForAnnual;
+                                                    const isSelected = leaveType === type;
+                                                    const color = SELECTED_TYPE_COLOR;
+                                                    const limit = currentStats.getLimit(type);
+                                                    const balance = currentStats.getBalance(type);
+                                                    const balanceLabel = notEligible
+                                                        ? 'Not eligible'
+                                                        : limit > 9000 ? '' : `${currentStats.fmt(balance)} of ${currentStats.fmt(limit)} left`;
+                                                    return (
+                                                        <button
+                                                            key={type}
+                                                            type="button"
+                                                            disabled={notEligible}
+                                                            onClick={() => { setLeaveType(type); if (type !== 'Casual') setCasualCriteria(null); if (type !== 'Sick') setSickEvidence(null); }}
+                                                            style={{
+                                                                textAlign: 'left',
+                                                                padding: '10px 12px',
+                                                                borderRadius: '10px',
+                                                                border: `2px solid ${isSelected ? color : notEligible ? '#e5e7eb' : '#d1d5db'}`,
+                                                                background: isSelected ? color : notEligible ? '#f3f4f6' : '#ffffff',
+                                                                color: isSelected ? '#ffffff' : notEligible ? '#9ca3af' : '#111827',
+                                                                cursor: notEligible ? 'not-allowed' : 'pointer',
+                                                                transition: 'all 0.15s ease',
+                                                            }}
                                                         >
-                                                            {type}
-                                                        </SelectItem>
-                                                    ))}
-                                                </SelectContent>
-                                            </Select>
+                                                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '14px', fontWeight: 700 }}>
+                                                                <span>{type}</span>
+                                                                {isSelected && <Check style={{ width: '16px', height: '16px' }} />}
+                                                            </div>
+                                                            {balanceLabel && (
+                                                                <div style={{ fontSize: '11px', marginTop: '2px', color: isSelected ? 'rgba(255,255,255,0.9)' : notEligible ? '#9ca3af' : '#6b7280' }}>
+                                                                    {balanceLabel}
+                                                                </div>
+                                                            )}
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
                                         </div>
+
+                                        {/* Casual criteria — required for new Casual leaves (mirrors the paper form) */}
+                                        {leaveType === 'Casual' && (
+                                            <div className="space-y-2">
+                                                <label className="text-sm font-medium">
+                                                    Casual leave criteria <span style={{ color: '#ef4444' }}>*</span>
+                                                    {!casualCriteria && <span style={{ marginLeft: '8px', fontSize: '12px', color: '#6b7280', fontWeight: 400 }}>— select one</span>}
+                                                </label>
+                                                <div style={{ border: `1px solid ${casualCriteria ? '#bfdbfe' : '#d1d5db'}`, borderRadius: '10px', overflow: 'hidden' }}>
+                                                    {CASUAL_CRITERIA.map((c, i) => {
+                                                        const on = casualCriteria === c.no;
+                                                        return (
+                                                            <button
+                                                                key={c.no}
+                                                                type="button"
+                                                                onClick={() => setCasualCriteria(c.no)}
+                                                                style={{
+                                                                    display: 'flex', alignItems: 'center', gap: '10px', width: '100%', textAlign: 'left',
+                                                                    padding: '7px 10px', fontSize: '12px', cursor: 'pointer',
+                                                                    background: on ? SELECTED_TYPE_COLOR : '#ffffff',
+                                                                    color: on ? '#ffffff' : '#111827',
+                                                                    borderTop: i === 0 ? 'none' : '1px solid #e5e7eb',
+                                                                }}
+                                                            >
+                                                                <span style={{ width: '16px', height: '16px', borderRadius: '50%', border: `2px solid ${on ? '#ffffff' : '#9ca3af'}`, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                                                    {on && <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#ffffff' }} />}
+                                                                </span>
+                                                                <span style={{ width: '18px', flexShrink: 0, color: on ? 'rgba(255,255,255,0.8)' : '#9ca3af', fontSize: '11px' }}>{c.no}.</span>
+                                                                <span style={{ flex: 1 }}>{c.text}</span>
+                                                                <span style={{ fontSize: '11px', whiteSpace: 'nowrap', color: on ? 'rgba(255,255,255,0.9)' : '#6b7280' }}>{c.allocation}</span>
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
+                                                <p style={{ fontSize: '11px', color: '#6b7280', margin: 0 }}>{CASUAL_CRITERIA_NOTE}</p>
+                                            </div>
+                                        )}
 
                                         {/* Duration Selection */}
                                         <div className="bg-gray-50 p-3 rounded-md border space-y-3">
@@ -1136,13 +1197,64 @@ export const LeaveManagement: React.FC = () => {
                                             )}
                                         </div>
 
+                                        {leaveType === 'Sick' && (
+                                            <div className="space-y-2">
+                                                <label className="text-sm font-medium">
+                                                    Supporting document <span style={{ color: '#ef4444' }}>*</span>
+                                                    <span style={{ marginLeft: '8px', fontSize: '12px', color: '#6b7280', fontWeight: 400 }}>medical certificate / prescription · PDF or image · max 5 MB</span>
+                                                </label>
+                                                <input
+                                                    ref={sickEvidenceInputRef}
+                                                    type="file"
+                                                    accept="image/*,application/pdf"
+                                                    style={{ display: 'none' }}
+                                                    onChange={e => {
+                                                        const f = e.target.files?.[0];
+                                                        if (!f) return;
+                                                        const ok = f.type.startsWith('image/') || f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf');
+                                                        if (!ok) { toast.error('Only PDF or image files are allowed'); e.target.value = ''; return; }
+                                                        if (f.size > MAX_FILE_BYTES) { toast.error('File must be 5 MB or smaller'); e.target.value = ''; return; }
+                                                        setSickEvidence(f);
+                                                    }}
+                                                />
+                                                {sickEvidence ? (
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px', border: '1px solid #bfdbfe', background: '#eff6ff', borderRadius: '10px' }}>
+                                                        {sickEvidence.type === 'application/pdf' ? <FileText style={{ width: '18px', height: '18px', color: SELECTED_TYPE_COLOR, flexShrink: 0 }} /> : <Paperclip style={{ width: '18px', height: '18px', color: SELECTED_TYPE_COLOR, flexShrink: 0 }} />}
+                                                        <div style={{ flex: 1, minWidth: 0 }}>
+                                                            <div style={{ fontSize: '13px', fontWeight: 600, color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sickEvidence.name}</div>
+                                                            <div style={{ fontSize: '11px', color: '#6b7280' }}>{formatBytes(sickEvidence.size)} · attached as evidence</div>
+                                                        </div>
+                                                        <button type="button" onClick={() => sickEvidenceInputRef.current?.click()} style={{ fontSize: '12px', fontWeight: 600, color: SELECTED_TYPE_COLOR, background: 'transparent', border: 'none', cursor: 'pointer' }}>Change</button>
+                                                        <button type="button" title="Remove" onClick={() => { setSickEvidence(null); if (sickEvidenceInputRef.current) sickEvidenceInputRef.current.value = ''; }} style={{ display: 'inline-flex', color: '#9ca3af', background: 'transparent', border: 'none', cursor: 'pointer' }}><X className="h-4 w-4" /></button>
+                                                    </div>
+                                                ) : (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => sickEvidenceInputRef.current?.click()}
+                                                        style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '14px', border: '2px dashed #d1d5db', borderRadius: '10px', background: '#fafafa', color: '#374151', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}
+                                                    >
+                                                        <Paperclip className="h-4 w-4" /> Attach PDF or image
+                                                    </button>
+                                                )}
+                                            </div>
+                                        )}
+
                                         <div className="space-y-2">
                                             <label className="text-sm font-medium">Reason</label>
-                                            <Textarea 
-                                                placeholder="Enter reason for leave..." 
+                                            <Textarea
+                                                placeholder="Enter reason for leave..."
                                                 value={reason}
                                                 onChange={e => setReason(e.target.value)}
                                             />
+                                            {leaveType && leaveType !== 'Sick' && ILLNESS_WORDS.test(reason) && (
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: '8px', fontSize: '12px', color: '#92400e' }}>
+                                                    <AlertCircle style={{ width: '14px', height: '14px', flexShrink: 0 }} />
+                                                    <span>Reason mentions illness but <b>{leaveType}</b> is selected — did you mean <b>Sick</b> leave?</span>
+                                                    <button type="button" onClick={() => { setLeaveType('Sick'); setCasualCriteria(null); }} style={{ marginLeft: 'auto', fontWeight: 700, color: '#b45309', textDecoration: 'underline', whiteSpace: 'nowrap' }}>
+                                                        Switch to Sick
+                                                    </button>
+                                                </div>
+                                            )}
                                         </div>
                                         {durationMode === 'full' && startDate && endDate && (() => {
                                             const preview = countLeaveDays(startDate, endDate, templates);
@@ -1164,8 +1276,39 @@ export const LeaveManagement: React.FC = () => {
                                             );
                                         })()}
                                     </div>
-                                <DialogFooter>
-                                    <Button onClick={handleSubmitLeave}>Confirm & Save</Button>
+                                <DialogFooter style={{ alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+                                    {(() => {
+                                        // Read-back line: state exactly what is about to be recorded so a wrong type is caught before saving
+                                        if (!leaveType) {
+                                            return <span style={{ fontSize: '12px', color: '#6b7280' }}>Select a leave type to continue</span>;
+                                        }
+                                        const fmtD = (s: string) => { try { return format(parseISO(s), 'd MMM'); } catch { return s; } };
+                                        let when = '';
+                                        if (durationMode === 'half' && startDate) when = `0.5 day · ${fmtD(startDate)}`;
+                                        else if (durationMode === 'partial' && startDate) when = `${partialHours || '?'} hr · ${fmtD(startDate)}`;
+                                        else if (durationMode === 'full' && startDate && endDate) {
+                                            const w = countLeaveDays(startDate, endDate, templates).working;
+                                            when = `${w} working day${w !== 1 ? 's' : ''} · ${startDate === endDate ? fmtD(startDate) : `${fmtD(startDate)} – ${fmtD(endDate)}`}`;
+                                        }
+                                        return (
+                                            <span style={{ fontSize: '12px', color: '#374151' }}>
+                                                Recording{' '}
+                                                <span className="inline-flex items-center px-3 py-1 rounded-full text-[11px] font-semibold text-white" style={{ background: SELECTED_TYPE_COLOR }}>
+                                                    {leaveType} Leave
+                                                </span>
+                                                {leaveType === 'Casual' && casualCriteria && <span style={{ color: '#6b7280' }}> · #{casualCriteria} {getCasualCriterion(casualCriteria)?.text}</span>}
+                                                {leaveType === 'Sick' && <span style={{ color: sickEvidence ? '#15803d' : '#b45309' }}> · {sickEvidence ? 'evidence attached' : 'evidence required'}</span>}
+                                                {when && <span style={{ color: '#6b7280' }}> · {when}</span>}
+                                            </span>
+                                        );
+                                    })()}
+                                    <Button
+                                        onClick={handleSubmitLeave}
+                                        disabled={!leaveType || isSubmittingLeave}
+                                        style={leaveType ? { background: SELECTED_TYPE_COLOR, color: '#ffffff' } : undefined}
+                                    >
+                                        {isSubmittingLeave ? <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Saving…</> : leaveType ? `Confirm ${leaveType} Leave` : 'Confirm & Save'}
+                                    </Button>
                                 </DialogFooter>
                             </DialogContent>
                         </Dialog>
@@ -1202,6 +1345,9 @@ export const LeaveManagement: React.FC = () => {
                                                     {format(parseISO(leave.startDate), 'MMM dd, yyyy')} - {format(parseISO(leave.endDate), 'MMM dd, yyyy')}
                                                 </h4>
                                                 <p className="text-sm text-gray-600 mt-1">{leave.reason}</p>
+                                                {leave.casualCriteria && (
+                                                    <p className="text-xs text-gray-500 mt-0.5">Criteria #{leave.casualCriteria}: {getCasualCriterion(leave.casualCriteria)?.text}</p>
+                                                )}
                                                 {/* Hard copy status */}
                                                 {(() => {
                                                     const hcDays = getHardCopyDeadlineDays(leave.type, !!leave.partialHours);
@@ -1242,6 +1388,15 @@ export const LeaveManagement: React.FC = () => {
                                                 })()}
                                             </div>
                                             <div className="flex items-center gap-1 shrink-0">
+                                                <Button
+                                                    size="icon"
+                                                    variant="ghost"
+                                                    className="h-8 w-8 text-blue-700 hover:bg-blue-50 hover:text-blue-800"
+                                                    title="View leave request form"
+                                                    onClick={() => openLeaveForm(leave)}
+                                                >
+                                                    <Eye className="h-4 w-4" />
+                                                </Button>
                                                 {/* Admin approve/reject buttons for Pending */}
                                                 {!isStaff && isPending && (
                                                     <>
@@ -1456,345 +1611,34 @@ export const LeaveManagement: React.FC = () => {
             </CardContent>
         </Card>
       ) : viewMode === 'records' ? (
-        // Records View
-        <div className="space-y-6">
-             <div className="flex items-center justify-between">
-                 <h2 className="text-2xl font-bold tracking-tight">Archived Leave Records</h2>
-                 <Button onClick={() => {
-                     setIsTransferDialogOpen(true);
-                     setIsCreatingFolder(true);
-                 }}>
-                     <Plus className="mr-2 h-4 w-4" /> New Archive Folder
-                 </Button>
-             </div>
-             
-             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                 {leaveFolders.map(folder => (
-                     <Card key={folder.id} className="hover:shadow-md transition-shadow">
-                         <CardHeader className="pb-2">
-                             <div className="flex justify-between items-start">
-                                 <Folder className="h-8 w-8 text-yellow-500" />
-                                 <Button variant="ghost" size="icon" className="text-red-400 hover:text-red-600" onClick={() => {
-                                     if(confirm('Delete folder and all its reports?')) deleteLeaveFolder(folder.id);
-                                 }}>
-                                     <Trash2 className="h-4 w-4" />
-                                 </Button>
-                             </div>
-                             <CardTitle className="mt-2">{folder.name}</CardTitle>
-                             <CardDescription>Created: {new Date(folder.createdAt).toLocaleDateString()}</CardDescription>
-                         </CardHeader>
-                         <CardContent>
-                             <div className="space-y-2">
-                                 {savedLeaveReports.filter(r => r.folderId === folder.id).length === 0 ? (
-                                     <p className="text-xs text-gray-400 italic">No reports</p>
-                                 ) : (
-                                     savedLeaveReports.filter(r => r.folderId === folder.id).map(report => (
-                                         <div key={report.id} className="flex items-center justify-between p-2 bg-gray-50 rounded hover:bg-gray-100 cursor-pointer group" 
-                                            onClick={async () => {
-                                                if (report.data) {
-                                                    setViewReport(report);
-                                                } else {
-                                                    const fullReport = await getItem('saved_leave_reports', report.id);
-                                                    if (fullReport) setViewReport(fullReport);
-                                                }
-                                            }}
-                                         >
-                                             <div className="flex items-center gap-2">
-                                                 <File className="h-4 w-4 text-blue-500" />
-                                                 <span className="text-sm font-medium truncate max-w-[150px]">{report.name}</span>
-                                             </div>
-                                             <Button 
-                                                 variant="ghost" 
-                                                 size="icon" 
-                                                 className="h-6 w-6 opacity-0 group-hover:opacity-100"
-                                                 onClick={(e) => {
-                                                     e.stopPropagation();
-                                                     if(confirm('Delete this report?')) deleteSavedLeaveReport(report.id);
-                                                 }}
-                                             >
-                                                 <X className="h-3 w-3" /> {/* Actually need to import X or trash */}
-                                                 <Trash2 className="h-3 w-3 text-red-500" />
-                                             </Button>
-                                         </div>
-                                     ))
-                                 )}
-                             </div>
-                         </CardContent>
-                     </Card>
-                 ))}
-             </div>
-         </div>
+        <LeaveRecordsView
+          leaves={leaves}
+          employees={employees}
+          leaveFolders={leaveFolders}
+          savedLeaveReports={savedLeaveReports}
+          currentUser={currentUser}
+          onNewFolder={() => { setIsTransferDialogOpen(true); setIsCreatingFolder(true); }}
+          onViewReport={setViewReport}
+          onDeleteFolder={deleteLeaveFolder}
+          onDeleteReport={deleteSavedLeaveReport}
+          getItem={getItem}
+          updateLeave={updateLeave}
+          onViewLeaveForm={openLeaveForm}
+        />
       ) : viewMode === 'pending' && !isStaff ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            {/* ── Header Card ── */}
-            <div style={{ background: '#fff', borderRadius: '16px', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.06)', overflow: 'hidden' }}>
-                {/* Title + Stats */}
-                <div style={{ padding: '20px 24px 16px', borderBottom: '1px solid #f1f5f9' }}>
-                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '16px', flexWrap: 'wrap' }}>
-                        <div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                <h2 style={{ fontSize: '17px', fontWeight: 700, color: '#0f172a', margin: 0 }}>Leave Approvals</h2>
-                                <span style={{ background: '#f59e0b', color: '#fff', fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '9999px' }}>{globalPendingLeavesCount}</span>
-                            </div>
-                            <p style={{ fontSize: '12px', color: '#94a3b8', marginTop: '3px', margin: '3px 0 0' }}>Review pending requests · Track document submissions</p>
-                        </div>
-                        {/* Live stat chips */}
-                        {(() => {
-                            const allItems = leaves.filter(l =>
-                                l.status === 'Pending' ||
-                                (l.status === 'Approved' && !l.hardCopyCollected && getHardCopyDeadlineDays(l.type, !!l.partialHours) !== null)
-                            );
-                            const todayMid = new Date(); todayMid.setHours(0,0,0,0);
-                            const overdueN = allItems.filter(l => {
-                                const dd = getHardCopyDeadlineDays(l.type, !!l.partialHours);
-                                if (!dd || l.hardCopyCollected) return false;
-                                const dl = addWorkingDays(l.createdAt ? new Date(l.createdAt) : parseISO(l.startDate), dd);
-                                dl.setHours(0,0,0,0);
-                                return todayMid > dl;
-                            }).length;
-                            const pendingApprovalN = allItems.filter(l => l.status === 'Pending').length;
-                            const awaitingDocN = allItems.filter(l => l.status === 'Approved').length;
-                            return (
-                                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-                                    {overdueN > 0 && (
-                                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca', fontSize: '11px', fontWeight: 600, padding: '4px 10px', borderRadius: '8px' }}>
-                                            <AlertCircle className="h-3 w-3" /> {overdueN} Overdue
-                                        </span>
-                                    )}
-                                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: '#fffbeb', color: '#92400e', border: '1px solid #fde68a', fontSize: '11px', fontWeight: 600, padding: '4px 10px', borderRadius: '8px' }}>
-                                        <RefreshCw className="h-3 w-3" /> {pendingApprovalN} Needs Approval
-                                    </span>
-                                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: '#eff6ff', color: '#1e40af', border: '1px solid #bfdbfe', fontSize: '11px', fontWeight: 600, padding: '4px 10px', borderRadius: '8px' }}>
-                                        <History className="h-3 w-3" /> {awaitingDocN} Awaiting Document
-                                    </span>
-                                </div>
-                            );
-                        })()}
-                    </div>
-                </div>
-                {/* Filters */}
-                <div style={{ padding: '14px 24px', display: 'flex', gap: '10px', flexWrap: 'wrap', background: '#fafafa' }}>
-                    <div style={{ position: 'relative', flex: 1, minWidth: '180px' }}>
-                        <Input placeholder="Search employee by name or ID..." value={pendingSearchQuery} onChange={(e) => setPendingSearchQuery(e.target.value)} className="pl-9 h-9 text-sm" />
-                        <User className="absolute left-3 top-2.5 h-3.5 w-3.5 text-gray-400" />
-                    </div>
-                    <Select value={pendingEmployeeFilter} onValueChange={setPendingEmployeeFilter}>
-                        <SelectTrigger className="w-[180px] h-9 text-sm"><SelectValue placeholder="All Employees" /></SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="All">All Employees</SelectItem>
-                            {employees.filter(e => e.status === 'Active').map(emp => (
-                                <SelectItem key={emp.id} value={emp.id}>{emp.name} ({emp.eid})</SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
-                    <input type="month" value={pendingMonthFilter} onChange={e => setPendingMonthFilter(e.target.value)}
-                        className="h-9 px-3 border border-gray-200 rounded-md text-sm bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-700"
-                        style={{ minWidth: '150px' }} title="Filter by month" />
-                    <Select value={pendingTypeFilter} onValueChange={setPendingTypeFilter}>
-                        <SelectTrigger className="w-[140px] h-9 text-sm"><SelectValue placeholder="All Types" /></SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="All">All Types</SelectItem>
-                            <SelectItem value="Casual">Casual</SelectItem>
-                            <SelectItem value="Sick">Sick</SelectItem>
-                            <SelectItem value="Annual">Annual</SelectItem>
-                            <SelectItem value="Maternity">Maternity</SelectItem>
-                            <SelectItem value="Other">Other</SelectItem>
-                        </SelectContent>
-                    </Select>
-                </div>
-            </div>
-
-            {/* ── Leave Cards ── */}
-            {(() => {
-                const AVATAR_COLORS = ['#6366f1','#8b5cf6','#ec4899','#f43f5e','#14b8a6','#3b82f6','#f59e0b','#10b981'];
-                const TYPE_COLORS: Record<string, string> = { Casual: '#f59e0b', Sick: '#ef4444', Annual: '#3b82f6', Maternity: '#ec4899', Other: '#8b5cf6' };
-
-                const allLeaves = leaves.filter(l =>
-                    l.status === 'Pending' ||
-                    (l.status === 'Approved' && !l.hardCopyCollected && getHardCopyDeadlineDays(l.type, !!l.partialHours) !== null)
-                );
-                const filtered = allLeaves.filter(leave => {
-                    const emp = employees.find(e => e.id === leave.employeeId);
-                    const matchesSearch = !pendingSearchQuery ||
-                        (emp?.name || '').toLowerCase().includes(pendingSearchQuery.toLowerCase()) ||
-                        (emp?.eid || '').toLowerCase().includes(pendingSearchQuery.toLowerCase());
-                    const matchesType = pendingTypeFilter === 'All' || leave.type === pendingTypeFilter;
-                    const matchesEmployee = pendingEmployeeFilter === 'All' || leave.employeeId === pendingEmployeeFilter;
-                    let matchesMonth = true;
-                    if (pendingMonthFilter) {
-                        matchesMonth = leave.startDate.substring(0,7) === pendingMonthFilter || leave.endDate.substring(0,7) === pendingMonthFilter;
-                    }
-                    return matchesSearch && matchesType && matchesEmployee && matchesMonth;
-                });
-
-                if (filtered.length === 0) return (
-                    <div style={{ background: '#fff', borderRadius: '16px', border: '1px dashed #e2e8f0', padding: '48px 24px', textAlign: 'center' }}>
-                        <div style={{ fontSize: '32px', marginBottom: '8px' }}>🎉</div>
-                        <p style={{ fontSize: '15px', fontWeight: 600, color: '#374151' }}>All caught up!</p>
-                        <p style={{ fontSize: '13px', color: '#94a3b8', marginTop: '4px' }}>No pending leave requests match your filters.</p>
-                    </div>
-                );
-
-                // Sort: overdue first → pending approval → awaiting doc, then by deadline
-                const todayMid = new Date(); todayMid.setHours(0,0,0,0);
-                const withMeta = filtered.map(l => {
-                    const dd = getHardCopyDeadlineDays(l.type, !!l.partialHours);
-                    const applied = l.createdAt ? new Date(l.createdAt) : parseISO(l.startDate);
-                    const dl = dd !== null ? addWorkingDays(applied, dd) : null;
-                    if (dl) dl.setHours(0,0,0,0);
-                    const overdue = dl ? todayMid > dl && !l.hardCopyCollected : false;
-                    return { l, dl, overdue, dd, applied };
-                });
-                withMeta.sort((a, b) => {
-                    if (a.overdue !== b.overdue) return a.overdue ? -1 : 1;
-                    if (a.l.status !== b.l.status) return a.l.status === 'Pending' ? -1 : 1;
-                    if (a.dl && b.dl) return a.dl.getTime() - b.dl.getTime();
-                    return 0;
-                });
-
-                return withMeta.map(({ l: leave, dl: deadline, overdue: isOverdue, dd: deadlineDays, applied: appliedDate }) => {
-                    const emp = employees.find(e => e.id === leave.employeeId);
-                    const needsHardCopy = deadline !== null;
-                    const canApprove = !needsHardCopy || !!leave.hardCopyCollected;
-                    const isAlreadyApproved = leave.status === 'Approved';
-                    const initials = (emp?.name || 'U').split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0,2);
-                    const avatarColor = AVATAR_COLORS[(emp?.name || 'U').charCodeAt(0) % AVATAR_COLORS.length];
-                    const typeColor = TYPE_COLORS[leave.type] || '#64748b';
-                    const accentColor = isOverdue ? '#ef4444' : isAlreadyApproved ? '#3b82f6' : '#f59e0b';
-                    const workingDays = deadlineDays !== null ? getWorkingDayPath(appliedDate, deadlineDays) : [];
-
-                    return (
-                        <div key={leave.id} style={{ background: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', borderLeft: `4px solid ${accentColor}`, boxShadow: '0 1px 3px rgba(0,0,0,0.05)', padding: '10px 16px' }}>
-                            {/* Single compact row */}
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-                                {/* Avatar */}
-                                <div style={{ width: '36px', height: '36px', borderRadius: '50%', background: avatarColor, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                                    <span style={{ color: '#fff', fontWeight: 700, fontSize: '12px' }}>{initials}</span>
-                                </div>
-
-                                {/* Employee info */}
-                                <div style={{ flex: 1, minWidth: '180px' }}>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                                        <span style={{ fontSize: '13px', fontWeight: 700, color: '#0f172a' }}>{emp?.name ?? 'Unknown'}</span>
-                                        <span style={{ fontSize: '10px', color: '#94a3b8' }}>{emp?.eid}</span>
-                                        <span style={{ display: 'inline-flex', alignItems: 'center', background: `${typeColor}18`, color: typeColor, fontSize: '9px', fontWeight: 700, padding: '1px 6px', borderRadius: '4px', border: `1px solid ${typeColor}25` }}>{leave.type}</span>
-                                        <span style={{ fontSize: '11px', color: '#64748b' }}>{leave.partialHours ? `${leave.partialHours} hr` : `${leave.days} day${leave.days > 1 ? 's' : ''}`}</span>
-                                    </div>
-                                    <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px' }}>
-                                        <span style={{ color: '#475569' }}>{format(parseISO(leave.startDate), 'MMM dd')} – {format(parseISO(leave.endDate), 'MMM dd, yyyy')}</span>
-                                        <span style={{ margin: '0 4px' }}>·</span>
-                                        <span style={{ fontStyle: 'italic' }}>"{leave.reason}"</span>
-                                    </div>
-                                </div>
-
-                                {/* Timeline circles (only when hard copy pending) */}
-                                {needsHardCopy && !leave.hardCopyCollected && (
-                                    <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
-                                        {workingDays.map((d, i, arr) => {
-                                            const isDeadlineDay = i === arr.length - 1;
-                                            const dNorm = new Date(d); dNorm.setHours(0,0,0,0);
-                                            const isPastDay = dNorm < todayMid;
-                                            const isTodayDay = dNorm.getTime() === todayMid.getTime();
-                                            let bg = '#fff', border = '#e2e8f0', col = '#94a3b8', fw: number = 500;
-                                            if (isDeadlineDay) { bg = isOverdue ? '#ef4444' : '#f59e0b'; border = bg; col = '#fff'; fw = 700; }
-                                            else if (isPastDay) { bg = '#f1f5f9'; border = '#e2e8f0'; col = '#cbd5e1'; }
-                                            else if (isTodayDay) { border = '#3b82f6'; col = '#1d4ed8'; fw = 700; }
-                                            return (
-                                                <React.Fragment key={i}>
-                                                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1px' }}>
-                                                        <div style={{ width: '34px', height: '34px', borderRadius: '50%', background: bg, border: `2px solid ${border}`, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', lineHeight: 1 }}>
-                                                            <span style={{ fontSize: '6px', color: col, fontWeight: 600, textTransform: 'uppercase' }}>{format(d, 'MMM')}</span>
-                                                            <span style={{ fontSize: '12px', color: col, fontWeight: fw }}>{format(d, 'd')}</span>
-                                                        </div>
-                                                        <span style={{ fontSize: '7px', color: isDeadlineDay ? (isOverdue ? '#ef4444' : '#f59e0b') : 'transparent', fontWeight: 700, lineHeight: 1 }}>Deadline</span>
-                                                    </div>
-                                                    {i < arr.length - 1 && <div style={{ width: '10px', height: '2px', background: '#e2e8f0', marginBottom: '9px', flexShrink: 0 }} />}
-                                                </React.Fragment>
-                                            );
-                                        })}
-                                    </div>
-                                )}
-
-                                {/* Doc received badge */}
-                                {leave.hardCopyCollected && needsHardCopy && (
-                                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: '#f0fdf4', color: '#15803d', border: '1px solid #bbf7d0', fontSize: '10px', fontWeight: 600, padding: '3px 8px', borderRadius: '6px', flexShrink: 0 }}>
-                                        <Check className="h-2.5 w-2.5" /> Doc received
-                                    </span>
-                                )}
-
-                                {/* Action buttons */}
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
-                                    {/* Mark received button */}
-                                    {needsHardCopy && !leave.hardCopyCollected && (
-                                        <button
-                                            onClick={() => updateLeave(leave.id, { hardCopyCollected: true })}
-                                            style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: '#eff6ff', color: '#1d4ed8', fontSize: '11px', fontWeight: 700, padding: '5px 10px', borderRadius: '7px', border: '1.5px solid #bfdbfe', cursor: 'pointer', whiteSpace: 'nowrap' }}
-                                            onMouseEnter={e => (e.currentTarget.style.background = '#dbeafe')}
-                                            onMouseLeave={e => (e.currentTarget.style.background = '#eff6ff')}
-                                        >
-                                            <File className="h-3 w-3" /> Mark Received
-                                        </button>
-                                    )}
-                                    {/* Approve/Reject */}
-                                    {!isAlreadyApproved && (
-                                        <>
-                                            {leave.hardCopyCollected ? (
-                                                <>
-                                                    <button
-                                                        onClick={() => updateLeave(leave.id, { hardCopyCollected: false })}
-                                                        style={{ fontSize: '10px', color: '#94a3b8', background: 'transparent', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '4px 8px', cursor: 'pointer' }}
-                                                        onMouseEnter={e => (e.currentTarget.style.background = '#f8fafc')}
-                                                        onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-                                                    >Undo</button>
-                                                    <button
-                                                        onClick={() => { updateLeave(leave.id, { status: 'Approved' }); toast.success(`Leave approved for ${emp?.name}`); }}
-                                                        style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: '#16a34a', color: '#fff', fontSize: '11px', fontWeight: 600, padding: '5px 12px', borderRadius: '9999px', border: 'none', cursor: 'pointer' }}
-                                                        onMouseEnter={e => (e.currentTarget.style.background = '#15803d')}
-                                                        onMouseLeave={e => (e.currentTarget.style.background = '#16a34a')}
-                                                    ><Check className="h-3 w-3" /> Approve</button>
-                                                </>
-                                            ) : !needsHardCopy ? (
-                                                <button
-                                                    onClick={() => { updateLeave(leave.id, { status: 'Approved' }); toast.success(`Leave approved for ${emp?.name}`); }}
-                                                    style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: '#16a34a', color: '#fff', fontSize: '11px', fontWeight: 600, padding: '5px 12px', borderRadius: '9999px', border: 'none', cursor: 'pointer' }}
-                                                    onMouseEnter={e => (e.currentTarget.style.background = '#15803d')}
-                                                    onMouseLeave={e => (e.currentTarget.style.background = '#16a34a')}
-                                                ><Check className="h-3 w-3" /> Approve</button>
-                                            ) : (
-                                                <button
-                                                    style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: '#f1f5f9', color: '#94a3b8', fontSize: '11px', fontWeight: 600, padding: '5px 12px', borderRadius: '9999px', border: 'none', cursor: 'not-allowed', opacity: 0.45 }}
-                                                    title="Mark document received first"
-                                                ><Check className="h-3 w-3" /> Approve</button>
-                                            )}
-                                            <button
-                                                onClick={() => { updateLeave(leave.id, { status: 'Rejected' }); toast.error(`Leave rejected for ${emp?.name}`); }}
-                                                style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: isOverdue ? '#ef4444' : 'transparent', color: isOverdue ? '#fff' : '#ef4444', fontSize: '11px', fontWeight: 600, padding: '5px 12px', borderRadius: '9999px', border: '1.5px solid #ef4444', cursor: 'pointer' }}
-                                                onMouseEnter={e => { e.currentTarget.style.background = '#ef4444'; e.currentTarget.style.color = '#fff'; }}
-                                                onMouseLeave={e => { e.currentTarget.style.background = isOverdue ? '#ef4444' : 'transparent'; e.currentTarget.style.color = isOverdue ? '#fff' : '#ef4444'; }}
-                                            ><X className="h-3 w-3" /> Reject</button>
-                                        </>
-                                    )}
-                                    {/* Status pill */}
-                                    {isOverdue && !leave.hardCopyCollected ? (
-                                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', background: '#ef4444', color: '#fff', fontSize: '9px', fontWeight: 700, padding: '3px 7px', borderRadius: '9999px', whiteSpace: 'nowrap' }}>
-                                            <AlertCircle className="h-2.5 w-2.5" /> Overdue
-                                        </span>
-                                    ) : isAlreadyApproved ? (
-                                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', background: '#2563eb', color: '#fff', fontSize: '9px', fontWeight: 600, padding: '3px 7px', borderRadius: '9999px', whiteSpace: 'nowrap' }}>
-                                            <Check className="h-2.5 w-2.5" /> Awaiting Doc
-                                        </span>
-                                    ) : (
-                                        <span style={{ display: 'inline-flex', background: '#fffbeb', color: '#92400e', border: '1px solid #fde68a', fontSize: '9px', fontWeight: 600, padding: '3px 7px', borderRadius: '9999px', whiteSpace: 'nowrap' }}>
-                                            Needs Approval
-                                        </span>
-                                    )}
-                                </div>
-                            </div>
-                        </div>
-                    );
-                });
-            })()}
-        </div>
+        <LeaveApprovalsView
+          leaves={leaves}
+          employees={employees}
+          templates={templates}
+          filters={{
+            search: pendingSearchQuery, setSearch: setPendingSearchQuery,
+            employee: pendingEmployeeFilter, setEmployee: setPendingEmployeeFilter,
+            month: pendingMonthFilter, setMonth: setPendingMonthFilter,
+            type: pendingTypeFilter, setType: setPendingTypeFilter,
+          }}
+          updateLeave={updateLeave}
+          onViewLeaveForm={openLeaveForm}
+        />
       ) : viewMode === 'dashboard' && isDIC ? (() => {
         const AVATAR_COLORS = ['#6366f1','#8b5cf6','#ec4899','#f43f5e','#14b8a6','#3b82f6','#f59e0b','#10b981'];
         const TYPE_COLORS: Record<string, string> = { Casual: '#f59e0b', Sick: '#ef4444', Annual: '#3b82f6', Maternity: '#ec4899', Other: '#8b5cf6' };
@@ -1809,11 +1653,11 @@ export const LeaveManagement: React.FC = () => {
         const renderCard = (leave: typeof leaves[0], showName: boolean) => {
             const emp = employees.find(e => e.id === leave.employeeId);
             const dd = getHardCopyDeadlineDays(leave.type, !!leave.partialHours);
-            const applied = leave.createdAt ? new Date(leave.createdAt) : parseISO(leave.startDate);
-            const dl = dd !== null ? addWorkingDays(applied, dd) : null;
+            const applied = hardCopyBaseDate(leave);
+            const dl = dd !== null ? addWorkingDays(applied, dd, templates) : null;
             if (dl) dl.setHours(0,0,0,0);
             const isOverdue = dl ? todayMid > dl && !leave.hardCopyCollected : false;
-            const workingDays = dd !== null ? getWorkingDayPath(applied, dd) : [];
+            const workingDays = dd !== null ? getWorkingDayPath(applied, dd, templates) : [];
             const typeColor = TYPE_COLORS[leave.type] || '#64748b';
             const avatarColor = AVATAR_COLORS[(emp?.name || 'U').charCodeAt(0) % AVATAR_COLORS.length];
             const initials = (emp?.name || 'U').split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0,2);
