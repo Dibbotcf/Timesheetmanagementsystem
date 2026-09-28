@@ -4,6 +4,7 @@ import { Button } from '../components/ui/button';
 import { ArrowLeft, Download, Users, Clock, TrendingUp, CalendarDays, FileText, ChevronDown, Search, Check, X } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import { toast } from 'sonner';
+import { calcLateMinutes } from '../components/PrintableTimesheet';
 
 interface Props { onBack: () => void; }
 
@@ -21,7 +22,7 @@ const nil = <span className="text-slate-300 select-none">—</span>;
 const fmt  = (n: number) => n > 0 ? (n % 1 === 0 ? String(n) : n.toFixed(1)) : null;
 
 export const LateDelayReport: React.FC<Props> = ({ onBack }) => {
-  const { employees, leaves, attendanceRecords } = useAppStore();
+  const { employees, leaves, attendanceRecords, timesheets, templates } = useAppStore();
   const [selectedMonth, setSelectedMonth] = useState<number>(new Date().getMonth() + 1);
   const [selectedYear,  setSelectedYear]  = useState<number>(new Date().getFullYear());
   const [isDownloading, setIsDownloading] = useState(false);
@@ -46,14 +47,69 @@ export const LateDelayReport: React.FC<Props> = ({ onBack }) => {
     [employees]
   );
 
+  // Mirrors TimesheetView's Late row (04) so the report always agrees with the timesheet:
+  // per day, prefer the attendance record's lateMinutes; where there is none (older months were
+  // never synced to attendance), derive it from the timesheet's in-time, as the sheet itself does.
+  // Holidays/weekly offs and full-day approved leaves are skipped; a half-day leave clears the late.
   const getLateData = (employeeId: string) => {
-    // Attendance records are keyed with 0-indexed month
-    const rec = attendanceRecords.find(r => r.id === `${employeeId}-${selectedYear}-${selectedMonth - 1}`);
-    if (!rec?.entryDetails) return { lateDays: 0, totalMinutes: 0, lateDates: '' };
+    const monthIdx = selectedMonth - 1; // attendance + timesheets store 0-indexed months
+    const rec = attendanceRecords.find(r => r.id === `${employeeId}-${selectedYear}-${monthIdx}`);
+    const ts = timesheets.find(t => t.employeeId === employeeId && t.year === selectedYear && t.month === monthIdx);
+    if (!rec?.entryDetails && !ts) return { lateDays: 0, totalMinutes: 0, lateDates: '' };
+
+    const liveLate: Record<number, number> = {};
+    for (const [d, det] of Object.entries(rec?.entryDetails || {}))
+      if (det.lateMinutes && det.lateMinutes > 0) liveLate[+d] = det.lateMinutes;
+
+    // Day -> leave shape, for approved leaves overlapping this month
+    const leaveByDay: Record<number, { isPartial: boolean; isHalfDay: boolean }> = {};
+    const MS = 24 * 60 * 60 * 1000;
+    for (const lv of leaves) {
+      if (lv.employeeId !== employeeId || lv.status !== 'Approved') continue;
+      const parseLocal = (v: string) => { const [y, m, d] = v.split('-').map(Number); return new Date(y, m - 1, d).getTime(); };
+      const isPartial = lv.days < 1 || (!!lv.partialHours && lv.partialHours > 0);
+      const isHalfDay = lv.days === 0.5;
+      for (let t = parseLocal(lv.startDate); t <= parseLocal(lv.endDate); t += MS) {
+        const d = new Date(t);
+        if (d.getFullYear() === selectedYear && d.getMonth() === monthIdx && !leaveByDay[d.getDate()])
+          leaveByDay[d.getDate()] = { isPartial, isHalfDay };
+      }
+    }
+
+    const tmpl = templates.find(t => t.year === selectedYear && t.month === monthIdx);
+    const defaultClockIn = ts?.defaultClockIn || '08:30';
+    const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate();
     const entries: { day: number; mins: number }[] = [];
-    for (const [d, det] of Object.entries(rec.entryDetails))
-      if (det.lateMinutes && det.lateMinutes > 0) entries.push({ day: +d, mins: det.lateMinutes });
-    entries.sort((a, b) => a.day - b.day);
+
+    for (let day = 1; day <= daysInMonth; day++) {
+      const dow = new Date(selectedYear, monthIdx, day).getDay();
+      const isWeekend = tmpl ? false : (dow === 5 || dow === 6); // Fri/Sat when no template
+      if (isWeekend || tmpl?.holidays?.some(h => h.date === day)) continue;
+      const lv = leaveByDay[day];
+      if (lv && !lv.isPartial) continue; // full-day leave — nothing to be late for
+
+      let mins = 0;
+      if (liveLate[day] !== undefined) {
+        mins = liveLate[day];
+      } else {
+        const ent = ts?.entries?.find(e => e.date === day);
+        if (ent) {
+          const stored = parseInt(ent.late || '0', 10) || 0;
+          if (lv?.isHalfDay) {
+            // Half-day leave: the sheet clears the late unless HR typed one in by hand
+            mins = ent.manualLate ? stored : 0;
+          } else if (ent.inTime) {
+            // Same condition the sheet uses to auto-derive vs keep a hand-entered value
+            const auto = !ent.manualLate || ent.late === '' || ent.isLeaveOverride || ent.isLeaveOverride === undefined;
+            mins = auto ? (parseInt(calcLateMinutes(ent.inTime, defaultClockIn) || '0', 10) || 0) : stored;
+          } else {
+            mins = stored;
+          }
+        }
+      }
+      if (mins > 0) entries.push({ day, mins });
+    }
+
     return {
       lateDays: entries.length,
       totalMinutes: entries.reduce((s, e) => s + e.mins, 0),
@@ -107,7 +163,7 @@ export const LateDelayReport: React.FC<Props> = ({ onBack }) => {
       const lv   = getLeavesByType(emp.id);
       return { sl: idx + 1, emp, ...late, ...lv, totalLeave: lv.casual + lv.sick + lv.earn + lv.other };
     }),
-    [activeEmployees, attendanceRecords, leaves, selectedMonth, selectedYear]
+    [activeEmployees, attendanceRecords, timesheets, templates, leaves, selectedMonth, selectedYear]
   );
 
   const stats = useMemo(() => {
