@@ -97,7 +97,8 @@ export interface Employee {
   id: string;
   name: string;
   eid: string;
-  designation: string;
+  designation: string; // "Position": DIC / Member — drives DIC access, not a job title
+  jobTitle?: string;    // "Designation": job title, e.g. "Senior Associate" (salary sheet, payslips)
   role: 'Admin/HR' | 'Staff' | 'Superadmin';
   status: 'Active' | 'Inactive';
   dob: string;
@@ -504,6 +505,7 @@ export default function App() {
   const logout = () => {
     setCurrentUser(null);
     localStorage.removeItem('tcf_user');
+    try { sessionStorage.removeItem('tcf_salary_unlocked'); } catch { /* ignore */ } // salary lock re-arms on logout
     setPreviewData(null);
   };
 

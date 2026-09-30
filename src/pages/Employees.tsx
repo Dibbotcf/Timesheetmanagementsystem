@@ -75,7 +75,8 @@ export const Employees: React.FC = () => {
   // --- Employee Logic ---
   const filteredEmployees = [...employees].filter(e => 
     e.name.toLowerCase().includes(search.toLowerCase()) || 
-    e.eid.toLowerCase().includes(search.toLowerCase())
+    e.eid.toLowerCase().includes(search.toLowerCase()) ||
+    (e.jobTitle || '').toLowerCase().includes(search.toLowerCase())
   ).sort((a, b) => {
     const eIdA = a.eid || '';
     const eIdB = b.eid || '';
@@ -132,6 +133,13 @@ export const Employees: React.FC = () => {
     }
     return best;
   })();
+
+  // Designation suggestions: titles already in use plus the ones on HR's salary statement
+  const designationOptions = useMemo(() => Array.from(new Set([
+    ...employees.map(e => e.jobTitle?.trim()).filter((t): t is string => !!t),
+    'Director', 'Assistant Manager', 'Deputy Manager', 'Sr. Consultant', 'Consultant', 'Associate Consultant',
+    'Senior Associate', 'Associate', 'Driver Cum Office Assistant',
+  ])), [employees]);
 
   const resetForm = () => {
     setFormData({ status: 'Active', role: 'Staff' });
@@ -285,6 +293,7 @@ export const Employees: React.FC = () => {
                     <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold px-3 py-3">Name</TableHead>
                     <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold px-3 py-3">Role</TableHead>
                     <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold px-3 py-3">Position</TableHead>
+                    <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold px-3 py-3">Designation</TableHead>
                     <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold px-3 py-3">Date of Birth</TableHead>
                     <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold px-3 py-3">Joining Date</TableHead>
                     <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold px-3 py-3">Status</TableHead>
@@ -294,7 +303,7 @@ export const Employees: React.FC = () => {
                 <TableBody>
                   {filteredEmployees.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={9} className="text-center h-24 text-slate-400">
+                      <TableCell colSpan={10} className="text-center h-24 text-slate-400">
                         No employees found.
                       </TableCell>
                     </TableRow>
@@ -324,6 +333,9 @@ export const Employees: React.FC = () => {
                           {emp.designation
                             ? <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-600">{emp.designation}</span>
                             : <span className="text-slate-300">—</span>}
+                        </TableCell>
+                        <TableCell className="px-3 py-3.5 text-sm text-slate-700 whitespace-nowrap">
+                          {emp.jobTitle || <span className="text-slate-300">—</span>}
                         </TableCell>
                         <TableCell className="text-sm text-slate-600 tabular-nums whitespace-nowrap px-3 py-3.5">{new Date(emp.dob).toLocaleDateString()}</TableCell>
                         <TableCell className="text-sm text-slate-600 tabular-nums whitespace-nowrap px-3 py-3.5">{emp.joiningDate ? new Date(emp.joiningDate).toLocaleDateString() : '—'}</TableCell>
@@ -572,6 +584,19 @@ export const Employees: React.FC = () => {
               </Select>
             </div>
             <div className="space-y-2">
+              <Label htmlFor="jobTitle">Designation</Label>
+              <Input
+                id="jobTitle"
+                list="designation-options"
+                value={formData.jobTitle || ''}
+                onChange={e => setFormData({...formData, jobTitle: e.target.value})}
+                placeholder="e.g. Senior Associate"
+              />
+              <datalist id="designation-options">
+                {designationOptions.map(d => <option key={d} value={d} />)}
+              </datalist>
+            </div>
+            <div className="space-y-2">
               <Label htmlFor="position">Position</Label>
               <Select
                 value={formData.designation || ''}
@@ -639,6 +664,7 @@ export const Employees: React.FC = () => {
               {/* Details grid */}
               <div className="px-6 py-5 grid grid-cols-2 gap-x-6 gap-y-4">
                 {[
+                  { label: 'Designation', value: viewingEmployee.jobTitle || '—' },
                   { label: 'Position', value: viewingEmployee.designation || '—' },
                   { label: 'Gender', value: viewingEmployee.gender || 'Not set' },
                   { label: 'Date of Birth', value: new Date(viewingEmployee.dob).toLocaleDateString() },

@@ -1,8 +1,8 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useAppStore, Employee, LeaveRecord } from '../App';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
-import { ArrowLeft, Download, Smartphone, Calendar, Clock, ClipboardList, HelpCircle, Timer, Fingerprint } from 'lucide-react';
+import { ArrowLeft, Download, Smartphone, Calendar, Clock, ClipboardList, HelpCircle, Timer, Fingerprint, Banknote, LockOpen } from 'lucide-react';
 import { toast } from 'sonner';
 import { toPng } from 'html-to-image';
 import { jsPDF } from 'jspdf';
@@ -10,10 +10,40 @@ import { SummaryReportView } from './OTManagement';
 import { EmployeeRecordsReport } from './EmployeeRecordsReport';
 import { LateDelayReport } from './LateDelayReport';
 import { ZKTAttendanceReport } from './ZKTAttendanceReport';
+import { SalaryReport } from './SalaryReport';
+import { ResignedToggle, ResignedTag, reportEmployees, isResigned } from '../components/ResignedToggle';
+import { SalaryLock, isSalaryUnlocked, canSeeSalary } from '../components/SalaryLock';
+
+// Locked salary card: blurred contents behind a breathing padlock; the shackle lifts on hover.
+const SALARY_LOCK_CSS = `
+.salary-lock-blur { filter: blur(4px); opacity: .55; user-select: none; pointer-events: none; transition: filter .3s, opacity .3s; }
+.salary-card:hover .salary-lock-blur { filter: blur(3px); opacity: .45; }
+.salary-lock-overlay { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(255,255,255,.35); }
+.salary-lock-badge { position: relative; width: 60px; height: 60px; border-radius: 9999px; background: #059669; color: #fff; display: flex; align-items: center; justify-content: center; box-shadow: 0 8px 20px rgba(5,150,105,.35); animation: salary-lock-float 3s ease-in-out infinite; }
+.salary-lock-ring { position: absolute; inset: 0; border-radius: 9999px; border: 2px solid #10b981; animation: salary-lock-ring 2.2s ease-out infinite; }
+.salary-lock-shackle { transform-box: fill-box; transform-origin: 100% 100%; animation: salary-lock-jiggle 3.2s ease-in-out infinite; transition: transform .35s ease; }
+.salary-card:hover .salary-lock-shackle { animation: none; transform: translateY(-3px) rotate(-18deg); }
+.salary-card:hover .salary-lock-badge { animation-play-state: paused; }
+@keyframes salary-lock-float { 0%,100% { transform: translateY(0) } 50% { transform: translateY(-4px) } }
+@keyframes salary-lock-ring { 0% { transform: scale(1); opacity: .7 } 100% { transform: scale(1.6); opacity: 0 } }
+@keyframes salary-lock-jiggle { 0%,70%,100% { transform: none } 76% { transform: translateY(-2px) } 82% { transform: none } 88% { transform: translateY(-1px) } }
+@media (prefers-reduced-motion: reduce) { .salary-lock-badge, .salary-lock-ring, .salary-lock-shackle { animation: none !important } }
+`;
 
 export const Reports: React.FC = () => {
-  const { employees, leaves, otRecords } = useAppStore();
+  const { employees, leaves, otRecords, currentUser } = useAppStore();
   const [activeReport, setActiveReport] = useState<string | null>(null);
+  const [askSalaryPassword, setAskSalaryPassword] = useState(false);
+  const salaryUnlocked = isSalaryUnlocked(); // re-read on every render (unlock/dismiss re-render this page)
+  // Salary card is shown only to the Superadmin and to people given a personal salary password.
+  const [salaryVisible, setSalaryVisible] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    setSalaryVisible(false);
+    canSeeSalary(currentUser).then(ok => { if (alive) setSalaryVisible(ok); });
+    return () => { alive = false; };
+  }, [currentUser?.id, currentUser?.role]);
+  useEffect(() => { if (!salaryVisible && activeReport === 'salary') setActiveReport(null); }, [salaryVisible, activeReport]);
   const [selectedMonth, setSelectedMonth] = useState<number | ''>(new Date().getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState<number | ''>(new Date().getFullYear());
   const [isDownloading, setIsDownloading] = useState(false);
@@ -37,9 +67,10 @@ export const Reports: React.FC = () => {
   // Dynamic years list from 2024 to 2030
   const years = Array.from({ length: 7 }, (_, i) => 2024 + i);
 
-  // Filter and sort active employees by their EID serial naturally
-  const activeEmployees = employees
-    .filter(e => e.status === 'Active')
+  // Active employees by default (resigned too when switched on), sorted by EID serial naturally
+  const [withResigned, setWithResigned] = useState(false);
+  const resignedCount = employees.filter(isResigned).length;
+  const activeEmployees = reportEmployees(employees, withResigned)
     .sort((a, b) => a.eid.localeCompare(b.eid, undefined, { numeric: true, sensitivity: 'base' }));
 
   // Safe helper to count leave days for a specific employee in the selected month.
@@ -161,6 +192,7 @@ export const Reports: React.FC = () => {
     return {
       sl: index + 1,
       name: emp.name,
+      resigned: isResigned(emp),
       leaveDays,
       allowance,
       deduction,
@@ -181,6 +213,13 @@ export const Reports: React.FC = () => {
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-20">
+      {askSalaryPassword && salaryVisible && (
+        <SalaryLock
+          currentUserId={currentUser?.id}
+          onUnlock={() => { setAskSalaryPassword(false); setActiveReport('salary'); }}
+          onCancel={() => setAskSalaryPassword(false)}
+        />
+      )}
       {activeReport === null ? (
         // Reports Grid View
         <div className="space-y-6">
@@ -319,10 +358,61 @@ export const Reports: React.FC = () => {
                 </div>
               </CardContent>
             </Card>
+            {/* Card 6: Salary & Payslips — only for the Superadmin and people given a salary password */}
+            {salaryVisible && <Card
+              className="hover:shadow-lg transition-all duration-300 border border-gray-200 cursor-pointer group hover:border-emerald-300 salary-card"
+              style={{ position: 'relative', overflow: 'hidden' }}
+              onClick={() => salaryUnlocked ? setActiveReport('salary') : setAskSalaryPassword(true)}
+              aria-label={salaryUnlocked ? 'Salary & Payslips' : 'Salary & Payslips — locked, click to enter password'}
+            >
+              <style>{SALARY_LOCK_CSS}</style>
+              {salaryUnlocked ? (
+                <span style={{ position: 'absolute', top: 12, right: 12, display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 12px', borderRadius: 9999, background: '#059669', color: '#fff', fontSize: 11, fontWeight: 600 }}>
+                  <LockOpen style={{ width: 12, height: 12 }} /> Unlocked
+                </span>
+              ) : (
+                <div className="salary-lock-overlay" aria-hidden="true">
+                  <div className="salary-lock-badge">
+                    <span className="salary-lock-ring" />
+                    <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path className="salary-lock-shackle" d="M7 11V7a5 5 0 0 1 10 0v4" />
+                      <rect x="3" y="11" width="18" height="11" rx="2.5" fill="currentColor" fillOpacity="0.12" />
+                      <circle cx="12" cy="16" r="1.4" fill="currentColor" />
+                      <path d="M12 17.4v1.6" />
+                    </svg>
+                  </div>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: '#064e3b', marginTop: 12 }}>Salary &amp; Payslips</div>
+                  <div style={{ fontSize: 12, color: '#475569', marginTop: 2 }}>Locked · click to enter password</div>
+                </div>
+              )}
+              <div className={salaryUnlocked ? undefined : 'salary-lock-blur'}>
+              <CardHeader className="flex flex-row items-center space-y-0 gap-4 pb-4">
+                <div className="p-3 rounded-lg bg-emerald-50 text-emerald-700 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
+                  <Banknote className="h-6 w-6" />
+                </div>
+                <div>
+                  <CardTitle className="text-lg font-bold group-hover:text-emerald-900">Salary &amp; Payslips</CardTitle>
+                  <CardDescription className="text-xs mt-1">Salary statement &amp; employee payslips</CardDescription>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-gray-500">
+                  Monthly Statement of Salary &amp; Allowances with OT and late deductions from the system. Export PDF/Excel and generate payslips.
+                </p>
+                <div className="mt-4 flex justify-end">
+                  <Button variant="ghost" className="text-emerald-700 hover:text-emerald-900 font-semibold text-xs group-hover:translate-x-1 transition-transform">
+                    Open &rarr;
+                  </Button>
+                </div>
+              </CardContent>
+              </div>
+            </Card>}
           </div>
         </div>
       ) : activeReport === 'zkt_attendance' ? (
         <ZKTAttendanceReport onBack={() => setActiveReport(null)} />
+      ) : activeReport === 'salary' && salaryVisible ? (
+        <SalaryReport onBack={() => setActiveReport(null)} />
       ) : activeReport === 'late_report' ? (
         <LateDelayReport onBack={() => setActiveReport(null)} />
       ) : activeReport === 'mobile_allowance' ? (
@@ -350,6 +440,7 @@ export const Reports: React.FC = () => {
 
             {/* Month Year Selectors */}
             <div className="flex flex-wrap items-center gap-6">
+              <ResignedToggle checked={withResigned} onChange={setWithResigned} count={resignedCount} />
               <div className="flex items-center gap-3">
                 <label className="text-sm font-bold text-gray-700">Month:</label>
                 <select
@@ -461,7 +552,7 @@ export const Reports: React.FC = () => {
                           {row.sl}
                         </td>
                         <td className="border border-black px-3 py-2 text-left font-medium text-black">
-                          {row.name}
+                          {row.name}{row.resigned && <ResignedTag />}
                         </td>
                         <td className="border border-black px-2 py-2 text-center text-black">
                           {row.leaveDays === 0 ? '' : row.leaveDays}

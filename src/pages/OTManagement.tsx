@@ -2,6 +2,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { jsPDF } from 'jspdf';
 import { useAppStore, OTRecord, Employee, ReportFolder, SavedReport } from '../App';
+import { ResignedToggle, ResignedTag, reportEmployees, isResigned } from '../components/ResignedToggle';
 import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -894,6 +895,9 @@ export const SummaryReportView = ({
 }) => {
     const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM
     const [customPrevDate, setCustomPrevDate] = useState('');
+    // Active employees by default; "Show resigned" adds the resigned ones
+    const [withResigned, setWithResigned] = useState(false);
+    const resignedCount = useMemo(() => employees.filter(isResigned).length, [employees]);
 
     // Update customPrevDate when selectedMonth changes
     React.useEffect(() => {
@@ -904,7 +908,7 @@ export const SummaryReportView = ({
     }, [selectedMonth]);
 
     const reportData = useMemo(() => {
-        const data = employees.map(emp => {
+        const data = reportEmployees(employees, withResigned).map(emp => {
             // 1. Current Month OT (Sum of hours in selected month)
             const currentMonthOT = otRecords
                 .filter(r => r.employeeId === emp.id && r.date.startsWith(selectedMonth) && r.status === 'Approved')
@@ -922,6 +926,7 @@ export const SummaryReportView = ({
                 id: emp.id,
                 name: emp.name,
                 eid: emp.eid || '',
+                resigned: isResigned(emp),
                 currentMonthOT,
                 prevMonthEndOT,
                 totalOT
@@ -940,7 +945,7 @@ export const SummaryReportView = ({
             if (aNum !== bNum) return aNum - bNum;
             return a.eid.localeCompare(b.eid);
         });
-    }, [employees, otRecords, selectedMonth, customPrevDate]);
+    }, [employees, otRecords, selectedMonth, customPrevDate, withResigned]);
 
     const prevDateMonthName = customPrevDate ? format(parseISO(customPrevDate), 'MMMM') : '';
     const currentMonthName = format(parseISO(`${selectedMonth}-01`), 'MMMM-yyyy');
@@ -1206,6 +1211,7 @@ export const SummaryReportView = ({
                                 className="bg-transparent text-gray-900 text-xs font-semibold outline-none cursor-pointer"
                             />
                         </div>
+                        <ResignedToggle checked={withResigned} onChange={setWithResigned} count={resignedCount} />
                         <button
                             onClick={openSaveDialog}
                             className="flex items-center gap-1.5 bg-gray-100 hover:bg-gray-200 text-gray-800 text-xs font-semibold px-3 py-2 rounded-lg transition-colors border border-gray-300"
@@ -1312,7 +1318,7 @@ export const SummaryReportView = ({
                                 {reportData.map((row, idx) => (
                                     <tr key={row.id} className={`border-b border-gray-100 transition-colors hover:bg-blue-50/40 ${idx % 2 === 1 ? 'bg-slate-50/60' : 'bg-white'}`}>
                                         <td className="px-4 py-2.5 text-center text-gray-400 text-xs border-r border-gray-100">{idx + 1}</td>
-                                        <td className="px-4 py-2.5 text-left font-medium text-gray-800 border-r border-gray-100">{row.name}</td>
+                                        <td className="px-4 py-2.5 text-left font-medium text-gray-800 border-r border-gray-100">{row.name}{row.resigned && <ResignedTag />}</td>
                                         <td className={`px-4 py-2.5 text-right border-r border-gray-100 font-mono text-xs tabular-nums ${row.currentMonthOT > 0 ? 'text-blue-700 font-semibold' : 'text-gray-300'}`}>
                                             {row.currentMonthOT > 0 ? row.currentMonthOT.toFixed(2) : '—'}
                                         </td>

@@ -4,7 +4,8 @@ import { Button } from '../components/ui/button';
 import { ArrowLeft, Download, Users, Clock, TrendingUp, CalendarDays, FileText, ChevronDown, Search, Check, X } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import { toast } from 'sonner';
-import { calcLateMinutes } from '../components/PrintableTimesheet';
+import { getMonthLate } from '../lib/lateMinutes';
+import { ResignedToggle, ResignedTag, reportEmployees, isResigned } from '../components/ResignedToggle';
 
 interface Props { onBack: () => void; }
 
@@ -40,82 +41,22 @@ export const LateDelayReport: React.FC<Props> = ({ onBack }) => {
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
+  // Active employees by default; "Show resigned" adds the resigned ones
+  const [withResigned, setWithResigned] = useState(false);
+  const resignedCount = useMemo(() => employees.filter(isResigned).length, [employees]);
   const activeEmployees = useMemo(() =>
-    employees
-      .filter(e => e.status === 'Active')
+    reportEmployees(employees, withResigned)
       .sort((a, b) => a.eid.localeCompare(b.eid, undefined, { numeric: true, sensitivity: 'base' })),
-    [employees]
+    [employees, withResigned]
   );
+  // a hidden resigned employee must not stay selected in the employee filter
+  useEffect(() => {
+    if (!withResigned) setSelectedEmpIds(ids => ids.filter(id => activeEmployees.some(e => e.id === id)));
+  }, [withResigned, activeEmployees]);
 
-  // Mirrors TimesheetView's Late row (04) so the report always agrees with the timesheet:
-  // per day, prefer the attendance record's lateMinutes; where there is none (older months were
-  // never synced to attendance), derive it from the timesheet's in-time, as the sheet itself does.
-  // Holidays/weekly offs and full-day approved leaves are skipped; a half-day leave clears the late.
-  const getLateData = (employeeId: string) => {
-    const monthIdx = selectedMonth - 1; // attendance + timesheets store 0-indexed months
-    const rec = attendanceRecords.find(r => r.id === `${employeeId}-${selectedYear}-${monthIdx}`);
-    const ts = timesheets.find(t => t.employeeId === employeeId && t.year === selectedYear && t.month === monthIdx);
-    if (!rec?.entryDetails && !ts) return { lateDays: 0, totalMinutes: 0, lateDates: '' };
-
-    const liveLate: Record<number, number> = {};
-    for (const [d, det] of Object.entries(rec?.entryDetails || {}))
-      if (det.lateMinutes && det.lateMinutes > 0) liveLate[+d] = det.lateMinutes;
-
-    // Day -> leave shape, for approved leaves overlapping this month
-    const leaveByDay: Record<number, { isPartial: boolean; isHalfDay: boolean }> = {};
-    const MS = 24 * 60 * 60 * 1000;
-    for (const lv of leaves) {
-      if (lv.employeeId !== employeeId || lv.status !== 'Approved') continue;
-      const parseLocal = (v: string) => { const [y, m, d] = v.split('-').map(Number); return new Date(y, m - 1, d).getTime(); };
-      const isPartial = lv.days < 1 || (!!lv.partialHours && lv.partialHours > 0);
-      const isHalfDay = lv.days === 0.5;
-      for (let t = parseLocal(lv.startDate); t <= parseLocal(lv.endDate); t += MS) {
-        const d = new Date(t);
-        if (d.getFullYear() === selectedYear && d.getMonth() === monthIdx && !leaveByDay[d.getDate()])
-          leaveByDay[d.getDate()] = { isPartial, isHalfDay };
-      }
-    }
-
-    const tmpl = templates.find(t => t.year === selectedYear && t.month === monthIdx);
-    const defaultClockIn = ts?.defaultClockIn || '08:30';
-    const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate();
-    const entries: { day: number; mins: number }[] = [];
-
-    for (let day = 1; day <= daysInMonth; day++) {
-      const dow = new Date(selectedYear, monthIdx, day).getDay();
-      const isWeekend = tmpl ? false : (dow === 5 || dow === 6); // Fri/Sat when no template
-      if (isWeekend || tmpl?.holidays?.some(h => h.date === day)) continue;
-      const lv = leaveByDay[day];
-      if (lv && !lv.isPartial) continue; // full-day leave — nothing to be late for
-
-      let mins = 0;
-      if (liveLate[day] !== undefined) {
-        mins = liveLate[day];
-      } else {
-        const ent = ts?.entries?.find(e => e.date === day);
-        if (ent) {
-          const stored = parseInt(ent.late || '0', 10) || 0;
-          if (lv?.isHalfDay) {
-            // Half-day leave: the sheet clears the late unless HR typed one in by hand
-            mins = ent.manualLate ? stored : 0;
-          } else if (ent.inTime) {
-            // Same condition the sheet uses to auto-derive vs keep a hand-entered value
-            const auto = !ent.manualLate || ent.late === '' || ent.isLeaveOverride || ent.isLeaveOverride === undefined;
-            mins = auto ? (parseInt(calcLateMinutes(ent.inTime, defaultClockIn) || '0', 10) || 0) : stored;
-          } else {
-            mins = stored;
-          }
-        }
-      }
-      if (mins > 0) entries.push({ day, mins });
-    }
-
-    return {
-      lateDays: entries.length,
-      totalMinutes: entries.reduce((s, e) => s + e.mins, 0),
-      lateDates: entries.map(e => `${e.day}(${e.mins})`).join(', '),
-    };
-  };
+  // Same per-day rules as TimesheetView's Late row (04) — see src/lib/lateMinutes.ts
+  const getLateData = (employeeId: string) =>
+    getMonthLate(employeeId, selectedYear, selectedMonth - 1, { attendanceRecords, timesheets, templates, leaves });
 
   // Uses the stored `days` (working-day count, weekly/public holidays already excluded at leave
   // creation) pro-rated by the leave's overlap with the selected month, matching TimesheetView's
@@ -358,6 +299,8 @@ export const LateDelayReport: React.FC<Props> = ({ onBack }) => {
         </div>
 
         <div className="flex items-center gap-2">
+
+          <ResignedToggle checked={withResigned} onChange={setWithResigned} count={resignedCount} />
 
           {/* ── Employee filter dropdown ── */}
           <div className="relative" ref={filterRef}>
@@ -632,7 +575,7 @@ export const LateDelayReport: React.FC<Props> = ({ onBack }) => {
                   <tr key={row.emp.id} className={`${sev.row} hover:bg-slate-50/80 transition-colors`}>
                     <td className="py-2.5 px-3 text-center text-slate-400 text-[11px]">{row.sl}</td>
                     <td className="py-2.5 px-4">
-                      <span className="font-medium text-slate-800 text-[12px] truncate block">{row.emp.name}</span>
+                      <span className="font-medium text-slate-800 text-[12px] truncate block">{row.emp.name}{isResigned(row.emp) && <ResignedTag />}</span>
                       {row.emp.eid && <span className="text-[10px] text-slate-400">{row.emp.eid}</span>}
                     </td>
                     <td className="py-2.5 px-3 text-center">
