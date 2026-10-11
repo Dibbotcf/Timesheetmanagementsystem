@@ -180,6 +180,7 @@ export interface Signature {
   name: string;
   role: string;
   imageUrl: string; // base64 or url
+  employeeId?: string; // whose signature this is (shown by EID) — fills the "Maker Signature" on their leave forms
 }
 
 export interface LeaveRecord {
@@ -194,6 +195,12 @@ export interface LeaveRecord {
   status: 'Pending' | 'Approved' | 'Rejected';
   createdAt?: string;
   hardCopyCollected?: boolean;
+  hrSignatureId?: string; // signature HR signed with (PIN-checked) on "Confirm By HR" — printed as the form's HR signature
+  hrSignedAt?: string;
+  hrSignedBy?: string;    // name of the logged-in user who confirmed
+  approvedSignatureId?: string; // signature the approver signed with (PIN-checked) — printed as the form's Approval signature
+  approvedAt?: string;
+  approvedBy?: string;    // name of the logged-in user who approved
   casualCriteria?: number; // 1-12, row number on the paper Leave Request Form. Only set on Casual leaves recorded after Sep 2026.
   attachments?: LeaveAttachment[]; // evidence metadata; file content lives in `leave_files:{id}` and is fetched on demand
 }
@@ -281,6 +288,7 @@ interface AppContextType {
   deleteEmployee: (id: string) => void;
 
   addSignature: (sig: Omit<Signature, 'id'>) => void;
+  updateSignature: (id: string, data: Partial<Signature>) => Promise<boolean>;
   deleteSignature: (id: string) => void;
 
   addLeave: (leave: LeaveRequest & { id?: string }) => Promise<LeaveRecord | null>;
@@ -770,6 +778,15 @@ export default function App() {
     }
   };
 
+  const updateSignature = async (id: string, data: Partial<Signature>) => {
+    const current = signatures.find(s => s.id === id);
+    if (!current) return false;
+    const updated = { ...current, ...data };
+    if (!(await saveItem('signatures', updated))) return false;
+    setSignatures(prev => prev.map(s => (s.id === id ? updated : s)));
+    return true;
+  };
+
   const deleteSignature = async (id: string) => {
     if (await deleteItem('signatures', id)) {
       setSignatures(signatures.filter(s => s.id !== id));
@@ -915,6 +932,7 @@ export default function App() {
       updateEmployee,
       deleteEmployee,
       addSignature,
+      updateSignature,
       deleteSignature,
       addLeave,
       updateLeave,

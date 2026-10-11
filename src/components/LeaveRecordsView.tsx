@@ -4,18 +4,18 @@ import { ArrowLeft, Check, AlertCircle, Download, Eye, File, FileText, Folder, L
 import { toPng } from 'html-to-image';
 import { toast } from 'sonner';
 import type { LeaveRecord, LeaveFolder, SavedLeaveReport, Employee, LeaveAttachment, LeaveAttachmentKind } from '../App';
-import { getHardCopyDeadlineDays } from '../lib/leaveDays';
 import { getCasualCriterion } from '../lib/leaveCriteria';
 import { uploadLeaveFile, fetchLeaveFile, deleteLeaveFile, openLeaveFile, formatBytes } from '../utils/leaveFiles';
-import { FONT, C, STATUS_STYLE, statusOf, Pill, TypePill, Avatar, OutlineBtn, PrimaryBtn, IconBtn, card, th, td, fmtQty, Bar } from './leaveUi';
+import { FONT, C, STATUS_STYLE, statusOf, Pill, TypePill, Avatar, OutlineBtn, PrimaryBtn, IconBtn, card, th, td, colLine, fmtQty, Bar } from './leaveUi';
 import { LeaveRequestFormSheet } from './LeaveRequestForm';
 import { buildMergedPdf, downloadPdfBytes, filePart, type PdfPart } from '../utils/leavePdf';
 
 // Leaves → Records tab.
 // A folder exists for every calendar month that has leave records (plus the current month), newest first,
 // with no manual step. Inside a month folder each leave shows the evidence HR must keep on file:
-//   • signed leave request form  — every leave that needs a hard copy
-//   • supporting document        — Sick leave only (medical certificate etc.)
+//   • supporting document — Sick leave only (medical certificate etc.)
+// The Leave Request Form itself is generated (the applicant's Maker Signature is added from
+// Employees → Signatures), so no signed copy is uploaded here.
 // Ad-hoc archive folders (saved balance snapshots) keep working as before. Uses the shared leaveUi kit.
 
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -31,11 +31,9 @@ export function folderMonth(f: LeaveFolder): string | null {
   return idx < 0 ? null : `${m[2]}-${String(idx + 1).padStart(2, '0')}`;
 }
 
-export const needsSignedForm = (l: LeaveRecord) => l.status !== 'Rejected' && getHardCopyDeadlineDays(l.type, !!l.partialHours) !== null;
 export const needsSupportingDoc = (l: LeaveRecord) => l.status !== 'Rejected' && l.type === 'Sick';
 const getAttachment = (l: LeaveRecord, kind: LeaveAttachmentKind) => (l.attachments || []).find(a => a.kind === kind);
-export const isEvidenceComplete = (l: LeaveRecord) =>
-  (!needsSignedForm(l) || !!getAttachment(l, 'signed_form')) && (!needsSupportingDoc(l) || !!getAttachment(l, 'supporting_doc'));
+export const isEvidenceComplete = (l: LeaveRecord) => !needsSupportingDoc(l) || !!getAttachment(l, 'supporting_doc');
 
 const fmtRange = (s: string, e: string) => s === e ? format(parseISO(s), 'MMM d') : `${format(parseISO(s), 'MMM d')} — ${format(parseISO(e), 'MMM d')}`;
 
@@ -276,7 +274,7 @@ export const LeaveRecordsView: React.FC<Props> = ({
             <span style={{ width: 36, height: 36, borderRadius: 9, background: '#fef3c7', color: '#b45309', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Folder style={{ width: 18, height: 18 }} /></span>
             <div>
               <div style={{ fontSize: 18, fontWeight: 700, color: C.ink, lineHeight: 1.2 }}>{ymLabel(openMonth)}</div>
-              <div style={{ fontSize: 12, color: C.muted }}>{rows.length} leave record{rows.length !== 1 ? 's' : ''} · signed forms and supporting documents</div>
+              <div style={{ fontSize: 12, color: C.muted }}>{rows.length} leave record{rows.length !== 1 ? 's' : ''} · leave forms and supporting documents</div>
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
@@ -313,9 +311,6 @@ export const LeaveRecordsView: React.FC<Props> = ({
                 <OutlineBtn onClick={() => downloadForms(rows)} disabled={!selected.size || !!bulkProgress} title="Leave Request Form for each selected leave; sick leaves include their supporting document as the next page">
                   <Download style={{ width: 13, height: 13 }} /> Leave Request Form
                 </OutlineBtn>
-                <OutlineBtn onClick={() => downloadEvidence(rows, 'signed_form')} disabled={!selected.size || !!bulkProgress} title="Uploaded signed forms of the selected leaves, merged">
-                  <Download style={{ width: 13, height: 13 }} /> Signed form
-                </OutlineBtn>
                 <OutlineBtn onClick={() => downloadEvidence(rows, 'supporting_doc')} disabled={!selected.size || !!bulkProgress} title="Uploaded supporting documents of the selected leaves, merged">
                   <Download style={{ width: 13, height: 13 }} /> Supporting doc
                 </OutlineBtn>
@@ -330,9 +325,9 @@ export const LeaveRecordsView: React.FC<Props> = ({
             </div>
           ) : (
             <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed', minWidth: 900 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed', minWidth: 780 }}>
                 <colgroup>
-                  <col style={{ width: 40 }} /><col style={{ width: 186 }} /><col style={{ width: 138 }} /><col style={{ width: 118 }} /><col style={{ width: 110 }} /><col /><col /><col style={{ width: 46 }} />
+                  <col style={{ width: 40 }} /><col style={{ width: 186 }} /><col style={{ width: 138 }} /><col style={{ width: 118 }} /><col style={{ width: 110 }} /><col /><col style={{ width: 46 }} />
                 </colgroup>
                 <thead>
                   <tr>
@@ -347,11 +342,10 @@ export const LeaveRecordsView: React.FC<Props> = ({
                       />
                     </th>
                     <th style={th}>Employee</th>
-                    <th style={th}>Type</th>
-                    <th style={th}>Duration</th>
-                    <th style={th}>Status</th>
-                    <th style={th}>Signed form</th>
-                    <th style={th}>Supporting doc</th>
+                    <th style={{ ...th, ...colLine }}>Type</th>
+                    <th style={{ ...th, ...colLine }}>Duration</th>
+                    <th style={{ ...th, ...colLine }}>Status</th>
+                    <th style={{ ...th, ...colLine }}>Supporting doc</th>
                     <th style={th}></th>
                   </tr>
                 </thead>
@@ -380,17 +374,16 @@ export const LeaveRecordsView: React.FC<Props> = ({
                             </div>
                           </div>
                         </td>
-                        <td style={td}>
+                        <td style={{ ...td, ...colLine }}>
                           <TypePill type={l.type} />
                           {l.casualCriteria && <div style={{ fontSize: 11, color: C.faint, marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={getCasualCriterion(l.casualCriteria)?.text}>{l.casualCriteria}. {getCasualCriterion(l.casualCriteria)?.text}</div>}
                         </td>
-                        <td style={td}>
+                        <td style={{ ...td, ...colLine }}>
                           <div style={{ color: C.ink, whiteSpace: 'nowrap' }}>{fmtRange(l.startDate, l.endDate)}</div>
                           <div style={{ fontSize: 12, color: C.muted }}>{fmtQty(l)}</div>
                         </td>
-                        <td style={td}><Pill bg={st.bg} fg={st.fg} bd={st.bd} upper>{st.label}</Pill></td>
-                        <td style={td}>{rejected ? <span style={{ color: C.faint }}>—</span> : <EvidenceCell leave={l} kind="signed_form" required={needsSignedForm(l)} />}</td>
-                        <td style={td}>{rejected || l.type !== 'Sick' ? <span style={{ color: C.faint }}>—</span> : <EvidenceCell leave={l} kind="supporting_doc" required />}</td>
+                        <td style={{ ...td, ...colLine }}><Pill bg={st.bg} fg={st.fg} bd={st.bd} upper>{st.label}</Pill></td>
+                        <td style={{ ...td, ...colLine }}>{rejected || l.type !== 'Sick' ? <span style={{ color: C.faint }}>—</span> : <EvidenceCell leave={l} kind="supporting_doc" required />}</td>
                         <td style={{ ...td, textAlign: 'right' }}><IconBtn onClick={() => onViewLeaveForm(l)} title="View leave request form"><Eye style={{ width: 15, height: 15 }} /></IconBtn></td>
                       </tr>
                     );
@@ -398,7 +391,7 @@ export const LeaveRecordsView: React.FC<Props> = ({
                 </tbody>
               </table>
               <div style={{ padding: '10px 14px', fontSize: 12, color: C.faint, borderTop: `1px solid ${C.line}` }}>
-                Signed form = the printed Leave Request Form with signatures. Sick leave also needs a supporting document (medical certificate / prescription). PDF or image, max 5 MB.
+                Sick leave needs a supporting document (medical certificate / prescription). PDF or image, max 5 MB.
               </div>
             </div>
           )}
@@ -413,7 +406,7 @@ export const LeaveRecordsView: React.FC<Props> = ({
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
         <div>
           <div style={{ fontSize: 18, fontWeight: 700, color: C.ink }}>Leave records</div>
-          <div style={{ fontSize: 13, color: C.muted, marginTop: 2 }}>A folder is created automatically for every month. Keep each leave's signed form and supporting documents inside.</div>
+          <div style={{ fontSize: 13, color: C.muted, marginTop: 2 }}>A folder is created automatically for every month. Each sick leave's supporting documents are kept inside.</div>
         </div>
         <PrimaryBtn onClick={onNewFolder}><Plus style={{ width: 16, height: 16 }} /> New archive folder</PrimaryBtn>
       </div>

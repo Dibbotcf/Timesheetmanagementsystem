@@ -1,8 +1,8 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { format, parseISO } from 'date-fns';
 import { toPng } from 'html-to-image';
-import { jsPDF } from 'jspdf';
-import { ArrowLeft, Download, Pencil, Printer, Save, X } from 'lucide-react';
+import { ArrowLeft, Download, Loader2, Paperclip, Pencil, Printer, Save, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Button } from './ui/button';
@@ -11,6 +11,9 @@ import { useAppStore } from '../App';
 import type { LeaveRecord, LeaveType, Employee } from '../App';
 import { CASUAL_CRITERIA, CASUAL_CRITERIA_NOTE } from '../lib/leaveCriteria';
 import { countLeaveDays } from '../lib/leaveDays';
+import { fetchLeaveFile, type LeaveFile } from '../utils/leaveFiles';
+import { buildMergedPdf, downloadPdfBytes, filePart, type PdfPart } from '../utils/leavePdf';
+import { renderPdfPages } from '../utils/pdfPreview';
 
 // Digital replica of the paper "TCF - Leave Application" form, laid out as one A4 page.
 // The same sheet renders read-only for viewing/PDF and switches its cells to inputs when `editing`.
@@ -78,6 +81,13 @@ export const LeaveRequestFormSheet = React.forwardRef<HTMLDivElement, SheetProps
   const rowKey: FormRowKey = v.type === 'Maternity' ? 'Other' : v.type;
   const isHourly = !!v.partialHours && v.partialHours > 0;
   const set = (patch: Partial<LeaveDraft>) => onChange?.(patch);
+  // The applicant's own signature, linked to them by EID under Employees → Signatures
+  const { signatures } = useAppStore();
+  const maker = signatures.find(s => s.employeeId && s.employeeId === leave.employeeId);
+  // The HR signature chosen (with its PIN) when HR confirmed the signed form
+  const hrSig = leave.hrSignatureId ? signatures.find(s => s.id === leave.hrSignatureId) : undefined;
+  // The approver's signature (signature + PIN when the leave was approved)
+  const approvalSig = leave.approvedSignatureId ? signatures.find(s => s.id === leave.approvedSignatureId) : undefined;
 
   return (
     <div ref={ref} id={domId} style={{ width: FORM_W, height: FORM_H, background: '#fff', color: INK, fontFamily: FONT, padding: FORM_PAD, boxSizing: 'border-box', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -226,16 +236,54 @@ export const LeaveRequestFormSheet = React.forwardRef<HTMLDivElement, SheetProps
         )}
       </div>
 
-      {/* Signatures — pinned to the foot of the page; at least 64px of signing space above the labels */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', marginTop: 'auto', paddingTop: 64, fontSize: 11, flexShrink: 0 }}>
-        <div style={{ textAlign: 'left' }}>Checker signature</div>
-        <div style={{ textAlign: 'center' }}>HR signature</div>
-        <div style={{ textAlign: 'right' }}>Approval signature</div>
+      {/* Signatures — pinned to the foot of the page; 64px of signing space above the labels.
+          The Maker space holds the applicant's linked signature, when they have one. */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', alignItems: 'end', marginTop: 'auto', paddingTop: 8, fontSize: 11, flexShrink: 0 }}>
+        <div style={{ textAlign: 'left' }}>
+          <div style={{ height: 52, marginBottom: 4, display: 'flex', alignItems: 'flex-end' }}>
+            {maker?.imageUrl && <img src={maker.imageUrl} alt={`${maker.name} signature`} style={{ maxHeight: 52, maxWidth: 190, objectFit: 'contain' }} />}
+          </div>
+          Maker Signature
+        </div>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ height: 52, marginBottom: 4, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+            {hrSig?.imageUrl && <img src={hrSig.imageUrl} alt={`${hrSig.name} signature`} style={{ maxHeight: 52, maxWidth: 190, objectFit: 'contain' }} />}
+          </div>
+          HR signature
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <div style={{ height: 52, marginBottom: 4, display: 'flex', alignItems: 'flex-end', justifyContent: 'flex-end' }}>
+            {approvalSig?.imageUrl && <img src={approvalSig.imageUrl} alt={`${approvalSig.name} signature`} style={{ maxHeight: 52, maxWidth: 190, objectFit: 'contain' }} />}
+          </div>
+          Approval signature
+        </div>
       </div>
     </div>
   );
 });
 LeaveRequestFormSheet.displayName = 'LeaveRequestFormSheet';
+
+// ── Supporting document (sick leave) — shown, printed and downloaded as A4 pages after the form ──
+const PHOTO_MARGIN = 30; // ≈ 8 mm, the same margin the PDF download gives a photo
+
+/** One page of the supporting document laid out as an A4 sheet: a photo gets a margin, a PDF page fills the sheet. */
+const A4Sheet: React.FC<{ src: string; alt: string; margin: boolean }> = ({ src, alt, margin }) => (
+  <div style={{ width: FORM_W, height: FORM_H, background: '#fff', padding: margin ? PHOTO_MARGIN : 0, boxSizing: 'border-box', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+    <img src={src} alt={alt} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', display: 'block' }} />
+  </div>
+);
+
+type SupportingDoc =
+  | { status: 'loading' }
+  | { status: 'ready'; file: LeaveFile; pages: string[]; isPdf: boolean }
+  | { status: 'error'; message: string };
+
+const NoteCard: React.FC<{ children: React.ReactNode; tone?: 'muted' | 'error' }> = ({ children, tone = 'muted' }) => (
+  <div style={{ width: FORM_W, maxWidth: '100%', boxSizing: 'border-box', display: 'flex', alignItems: 'center', gap: 8, padding: '12px 16px', borderRadius: 8, fontSize: 13,
+    background: tone === 'error' ? '#fef2f2' : '#fff', border: `1px solid ${tone === 'error' ? '#fecaca' : '#e5e7eb'}`, color: tone === 'error' ? '#b91c1c' : '#6b7280' }}>
+    {children}
+  </div>
+);
 
 // Full-page viewer/editor, opened in its own tab from the leave lists: /leave/:id/view
 export const LeaveRequestFormPage: React.FC = () => {
@@ -249,6 +297,24 @@ export const LeaveRequestFormPage: React.FC = () => {
 
   const leave = leaves.find(l => l.id === id) || null;
   const employee = leave ? employees.find(e => e.id === leave.employeeId) : undefined;
+
+  // A sick leave's supporting document follows the form as A4 page(s) — on screen, in print and in the PDF
+  const supportingAtt = leave?.type === 'Sick' ? (leave.attachments || []).find(a => a.kind === 'supporting_doc') : undefined;
+  const [doc, setDoc] = useState<SupportingDoc | null>(null);
+  useEffect(() => {
+    if (!supportingAtt) { setDoc(null); return; }
+    let alive = true;
+    setDoc({ status: 'loading' });
+    (async () => {
+      const file = await fetchLeaveFile(supportingAtt.id);
+      if (!file) throw new Error('The uploaded file could not be found');
+      const isPdf = file.mime === 'application/pdf';
+      const pages = isPdf ? await renderPdfPages(file.dataUrl, FORM_W) : [file.dataUrl];
+      if (alive) setDoc({ status: 'ready', file, pages, isPdf });
+    })().catch(err => { if (alive) setDoc({ status: 'error', message: err?.message || 'Could not open the document' }); });
+    return () => { alive = false; };
+  }, [supportingAtt?.id]);
+  const docLoading = doc?.status === 'loading';
 
   const isAdmin = currentUser?.role === 'Admin/HR' || currentUser?.role === 'Superadmin';
   // Staff may only open their own leave (DIC staff also review others' pending leaves)
@@ -326,19 +392,14 @@ export const LeaveRequestFormPage: React.FC = () => {
     setDownloading(true);
     try {
       // Same approach as TimesheetView: rasterise with the browser renderer (handles oklch), then place on A4.
-      const dataUrl = await toPng(sheetRef.current, { pixelRatio: 2, backgroundColor: '#ffffff', cacheBust: true });
-      const img = new Image();
-      await new Promise<void>((res, rej) => { img.onload = () => res(); img.onerror = rej; img.src = dataUrl; });
       // The sheet is laid out at A4 proportions with its own inner margins, so it fills the page exactly.
-      const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-      const pageW = pdf.internal.pageSize.getWidth();   // 210
-      const pageH = pdf.internal.pageSize.getHeight();  // 297
-      const ratio = Math.min(pageW / img.width, pageH / img.height);
-      const finalW = img.width * ratio;
-      const finalH = img.height * ratio;
-      pdf.addImage(dataUrl, 'PNG', (pageW - finalW) / 2, (pageH - finalH) / 2, finalW, finalH);
+      const dataUrl = await toPng(sheetRef.current, { pixelRatio: 2, backgroundColor: '#ffffff', cacheBust: true });
+      const parts: PdfPart[] = [{ kind: 'image', dataUrl, fit: 'bleed' }];
+      // A sick leave's supporting document follows as the next A4 page(s)
+      if (doc?.status === 'ready') parts.push(filePart(doc.file.dataUrl, doc.file.mime));
+      const bytes = await buildMergedPdf(parts, `Leave Request – ${employee?.name || ''}`);
       const who = (employee?.name || 'Employee').replace(/\s+/g, '_');
-      pdf.save(`Leave_Request_${who}_${leave.startDate}.pdf`);
+      downloadPdfBytes(bytes, `Leave_Request_${who}_${leave.startDate}.pdf`);
     } catch (err: any) {
       console.error('Leave form PDF error:', err);
       toast.error(`PDF error: ${err?.message || 'Unknown error'}`);
@@ -362,15 +423,27 @@ export const LeaveRequestFormPage: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gray-100 pb-10 print:bg-white print:pb-0">
-      {/* Print: override the app-wide A3-landscape @page (attendance sheet) and print only the A4 sheet */}
+      {/* Print: override the app-wide A3-landscape @page (attendance sheet) and print only the print copy below —
+          the form, then a sick leave's supporting document, each on its own A4 page */}
       <style>{`
+        #leave-print-root { display: none; }
         @media print {
           @page { size: A4 portrait; margin: 0; }
-          body * { visibility: hidden !important; }
-          #leave-form-sheet, #leave-form-sheet * { visibility: visible !important; }
-          #leave-form-sheet { position: absolute !important; left: 0 !important; top: 0 !important; width: 210mm !important; height: 297mm !important; box-shadow: none !important; outline: none !important; }
+          body > *:not(#leave-print-root) { display: none !important; }
+          #leave-print-root { display: block !important; }
+          .leave-print-page { width: 210mm; height: 297mm; overflow: hidden; break-after: page; page-break-after: always; }
+          .leave-print-page:last-child { break-after: auto; page-break-after: auto; }
         }
       `}</style>
+      {createPortal(
+        <div id="leave-print-root">
+          <div className="leave-print-page"><LeaveRequestFormSheet leave={leave} employee={employee} domId="leave-form-print" /></div>
+          {doc?.status === 'ready' && doc.pages.map((src, i) => (
+            <div key={i} className="leave-print-page"><A4Sheet src={src} alt={`Supporting document page ${i + 1}`} margin={!doc.isPdf} /></div>
+          ))}
+        </div>,
+        document.body,
+      )}
       {/* Toolbar - hidden on print */}
       <div className="bg-white border-b px-8 py-4 flex justify-between items-center sticky top-0 z-30 print:hidden shadow-sm">
         <div className="flex items-center gap-4">
@@ -411,10 +484,10 @@ export const LeaveRequestFormPage: React.FC = () => {
                   <Pencil className="h-4 w-4" /> Edit
                 </Button>
               )}
-              <Button variant="outline" onClick={() => window.print()} className="gap-2">
+              <Button variant="outline" onClick={() => window.print()} disabled={docLoading} className="gap-2" title={docLoading ? 'Loading the supporting document…' : undefined}>
                 <Printer className="h-4 w-4" /> Print
               </Button>
-              <Button onClick={handleDownload} disabled={downloading} className="bg-blue-900 hover:bg-blue-800 text-white gap-2">
+              <Button onClick={handleDownload} disabled={downloading || docLoading} className="bg-blue-900 hover:bg-blue-800 text-white gap-2">
                 <Download className="h-4 w-4" /> {downloading ? 'Generating…' : 'Download PDF'}
               </Button>
             </>
@@ -422,10 +495,32 @@ export const LeaveRequestFormPage: React.FC = () => {
         </div>
       </div>
 
-      <div className="py-8 print:py-0 flex justify-center">
+      <div className="py-8 print:py-0 flex flex-col items-center gap-6">
         <div className="print:w-full" style={{ boxShadow: '0 2px 12px rgba(0,0,0,0.12)', outline: editing ? '3px solid #2563eb' : 'none' }}>
           <LeaveRequestFormSheet ref={sheetRef} leave={leave} employee={employee} editing={editing} draft={draft ?? undefined} onChange={onDraftChange} />
         </div>
+
+        {/* Sick leave: the supporting document, page by page as A4 sheets */}
+        {leave.type === 'Sick' && (
+          !supportingAtt ? (
+            <NoteCard><Paperclip className="h-4 w-4" /> No supporting document uploaded for this sick leave yet — add it under Leaves → Records.</NoteCard>
+          ) : doc?.status === 'error' ? (
+            <NoteCard tone="error"><Paperclip className="h-4 w-4" /> {supportingAtt.name}: {doc.message}</NoteCard>
+          ) : doc?.status !== 'ready' ? (
+            <NoteCard><Loader2 className="h-4 w-4 animate-spin" /> Loading supporting document…</NoteCard>
+          ) : (
+            doc.pages.map((src, i) => (
+              <div key={i} className="flex flex-col items-center gap-2">
+                <div style={{ width: FORM_W, maxWidth: '100%', fontSize: 12, color: '#6b7280', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Paperclip className="h-3.5 w-3.5" /> Supporting document · {doc.file.name}{doc.pages.length > 1 ? ` · page ${i + 1} of ${doc.pages.length}` : ''}
+                </div>
+                <div style={{ boxShadow: '0 2px 12px rgba(0,0,0,0.12)' }}>
+                  <A4Sheet src={src} alt={`${doc.file.name}, page ${i + 1}`} margin={!doc.isPdf} />
+                </div>
+              </div>
+            ))
+          )
+        )}
       </div>
     </div>
   );

@@ -47,7 +47,7 @@ AlertDialogOverlay.displayName = AlertDialogPrimitive.Overlay.displayName;
 const AlertDialogContent = React.forwardRef<
   React.ElementRef<typeof AlertDialogPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Content>
->(({ className, ...props }, ref) => (
+>(({ className, onEscapeKeyDown, ...props }, ref) => (
   <AlertDialogPortal>
     <AlertDialogOverlay />
     <AlertDialogPrimitive.Content
@@ -58,6 +58,8 @@ const AlertDialogContent = React.forwardRef<
         className,
       )}
       {...props}
+      // App-wide rule: closes only through its own buttons (an outside click never closes an alert dialog)
+      onEscapeKeyDown={e => { onEscapeKeyDown?.(e); e.preventDefault(); }}
     />
   </AlertDialogPortal>
 ));

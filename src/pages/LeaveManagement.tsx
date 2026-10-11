@@ -10,6 +10,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '../components/ui/popove
 import { Calendar as CalendarIcon, Plus, Trash2, User, AlertCircle, Settings, RefreshCw, LayoutList, UserSquare2, History, ArrowRightLeft, Folder, Save, File, Download, Eye, X, Check, ChevronsUpDown, Paperclip, FileText, Loader2 } from 'lucide-react';
 import { Checkbox } from '../components/ui/checkbox';
 import { useAppStore, LeaveType, LeaveRequest, LeaveRecord, Employee, SavedLeaveReport } from '../App';
+import { signAsHr, signToApprove, HR_SIGN_UNDO } from '../components/SignaturePin';
 import { toast } from 'sonner@2.0.3';
 import { format, differenceInDays, parseISO, addYears, differenceInYears } from 'date-fns';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
@@ -35,7 +36,7 @@ const SELECTED_TYPE_COLOR = '#2563eb'; // single blue for the chosen tile, badge
 const ILLNESS_WORDS = /\b(sick|ill|illness|fever|flu|cold|doctor|hospital|clinic|medical|medicine|headache|pain|unwell|surgery|injur)/i;
 
 export const LeaveManagement: React.FC = () => {
-  const { employees, leaves, addLeave, updateLeave, deleteLeave, updateEmployee, deleteEmployee, currentUser, leaveFolders, addLeaveFolder, deleteLeaveFolder, savedLeaveReports, addSavedLeaveReport, deleteSavedLeaveReport, getItem, templates } = useAppStore();
+  const { employees, leaves, addLeave, updateLeave, deleteLeave, updateEmployee, deleteEmployee, currentUser, leaveFolders, addLeaveFolder, deleteLeaveFolder, savedLeaveReports, addSavedLeaveReport, deleteSavedLeaveReport, getItem, templates, signatures } = useAppStore();
   
   const isStaff = currentUser?.role === 'Staff';
   const isDIC = isStaff && currentUser?.designation === 'DIC';
@@ -332,6 +333,17 @@ export const LeaveManagement: React.FC = () => {
       return;
     }
 
+    // Admin/HR and Superadmin records are approved on the spot, so they must be signed first (signature + PIN).
+    // Cancelled or wrong PIN → nothing is recorded.
+    // The Record Leave dialog steps aside while signing (it would hold the keyboard focus), and comes back
+    // with everything still filled in if signing is cancelled or the save fails.
+    let approval: Partial<LeaveRecord> | null = null;
+    if (!isStaff) {
+      setIsAddDialogOpen(false);
+      approval = await signToApprove({ signatures, user: currentUser, subject: `${selectedEmployee?.name ?? 'this employee'} · ${leaveType} · ${finalStartDate}${finalEndDate !== finalStartDate ? ` to ${finalEndDate}` : ''}` });
+      if (!approval) { toast.error('Leave not recorded — it needs an approval signature.'); setIsAddDialogOpen(true); return; }
+    }
+
     // The evidence file is linked to the leave id, so the id is fixed up front and the file goes up first.
     const leaveId = Math.random().toString(36).substr(2, 9);
     setIsSubmittingLeave(true);
@@ -352,15 +364,18 @@ export const LeaveManagement: React.FC = () => {
         reason,
         casualCriteria: leaveType === 'Casual' && casualCriteria ? casualCriteria : undefined,
         attachments: evidenceMeta ? [evidenceMeta] : undefined,
-        // Staff submits as Pending; Admin/HR records are auto-Approved
-        status: isStaff ? 'Pending' : 'Approved'
+        // Staff submits as Pending; Admin/HR records are approved with the signature taken above
+        status: isStaff ? 'Pending' : 'Approved',
+        ...(approval ?? {}),
       });
       if (!created) {
         if (evidenceMeta) await deleteLeaveFile(evidenceMeta.id); // don't leave an orphaned file behind
+        setIsAddDialogOpen(true);
         return;
       }
     } catch (err: any) {
       toast.error(err?.message || 'Could not upload the supporting document');
+      setIsAddDialogOpen(true);
       return;
     } finally {
       setIsSubmittingLeave(false);
@@ -416,7 +431,7 @@ export const LeaveManagement: React.FC = () => {
 
     if (selectedForTransfer.size > 0) {
         // Generate Snapshot Data
-        const selectedEmps = employees.filter(e => selectedForTransfer.has(e.id));
+        const selectedEmps = employees.filter(e => selectedForTransfer.has(e.id)).sort(byEid);
         const snapshotData = selectedEmps.map(emp => {
             const stats = calculateEmployeeLeaveStats(emp);
             return {
@@ -452,6 +467,9 @@ export const LeaveManagement: React.FC = () => {
     setTransferFolderName('');
     setIsCreatingFolder(false);
   };
+
+  // Employee lists run in EID serial order (TCF-15, TCF-23, … — same as the Employees page)
+  const byEid = (a: Employee, b: Employee) => a.eid.localeCompare(b.eid, undefined, { numeric: true, sensitivity: 'base' });
 
   const toggleSelectAll = () => {
     const activeEmps = employees.filter(e => e.status === 'Active');
@@ -916,55 +934,77 @@ export const LeaveManagement: React.FC = () => {
                             )}
                         </div>
 
-                        {Object.entries(LEAVE_LIMITS).map(([type, defaultLimit]) => {
-                            const lType = type as LeaveType;
-                            
-                            const limit = currentStats.getLimit(lType);
-                            const balance = currentStats.getBalance(lType);
-                            // const used = currentStats.usedLeaves[lType] || 0; // OLD
-                            const used = currentStats.getUsed(lType);
-                            
-                            const isCustomLimit = selectedEmployee?.customLeaveLimits?.[lType] !== undefined;
-                            const isCustomUsed = selectedEmployee?.customLeaveUsed?.[lType] !== undefined;
-                            const isUnlimited = limit > 9000;
-                            
-                            // Visibility Logic
-                            if (!isCustomLimit && !isCustomUsed) {
-                                if (lType === 'Maternity' && !currentStats.isEligibleForMaternity) return null;
-                            }
-
-                            return (
-                                <Card key={type} className={lType === 'Annual' && !currentStats.isEligibleForAnnual && !isCustomLimit ? 'opacity-60 bg-gray-50' : ''}>
-                                    <CardContent className="pt-6 pb-4">
-                                        <div className="flex justify-between items-center mb-2">
-                                            <span className="font-bold text-gray-700 flex items-center gap-2">
-                                                {type} Leave
-                                                {isCustomLimit && <Badge variant="secondary" className="text-[10px] h-5 px-1">Limit: Custom</Badge>}
-                                            </span>
-                                            {lType === 'Annual' && !currentStats.isEligibleForAnnual && !isCustomLimit && <Badge variant="outline">Locked</Badge>}
-                                        </div>
-                                        <div className="space-y-2">
-                                            <div className="flex justify-between text-sm">
-                                                <span className="text-gray-500 flex items-center gap-1">
-                                                    Used: {currentStats.fmt(used)}
-                                                    {isCustomUsed && <Badge variant="secondary" className="text-[10px] h-4 px-1">Custom</Badge>}
-                                                </span>
-                                                <span className="text-gray-500">Limit: {isUnlimited ? '∞' : currentStats.fmt(limit)}</span>
-                                            </div>
-                                            <div className="w-full bg-gray-200 rounded-full h-2.5">
-                                                <div 
-                                                    className={`h-2.5 rounded-full ${balance < 2 ? 'bg-red-500' : 'bg-green-600'}`} 
-                                                    style={{ width: isUnlimited ? '0%' : `${Math.min((used / limit) * 100, 100)}%` }}
-                                                ></div>
-                                            </div>
-                                            <div className="text-right text-sm font-bold text-blue-700">
-                                                {isUnlimited ? 'Unlimited' : `${currentStats.fmt(balance)} days remaining`}
-                                            </div>
-                                        </div>
-                                    </CardContent>
-                                </Card>
+                        {/* Balances as one compact table: Used · Limit · Left per type, a thin usage bar under each row.
+                            A number HR set by hand in the Set dialog sits in a soft indigo chip. */}
+                        {(() => {
+                            const GRID = '1fr 42px 42px 64px';
+                            // Annual and Maternity have an eligibility rule, labelled (Eligible) / (Not eligible); a custom limit from HR counts as eligible.
+                            // Maternity isn't listed at all for male employees (unless HR set a value for them).
+                            const rows = (Object.keys(LEAVE_LIMITS) as LeaveType[]).filter(lType =>
+                                lType !== 'Maternity' || currentStats.isEligibleForMaternity
+                                || selectedEmployee?.customLeaveLimits?.Maternity !== undefined || selectedEmployee?.customLeaveUsed?.Maternity !== undefined);
+                            const anyCustom = rows.some(t => selectedEmployee?.customLeaveLimits?.[t] !== undefined || selectedEmployee?.customLeaveUsed?.[t] !== undefined);
+                            const HR_CHIP: React.CSSProperties = { background: '#eef2ff', color: '#4338ca', fontWeight: 600, borderRadius: 6, padding: '1px 6px' };
+                            const HrNum = ({ what, children }: { what: string; children: React.ReactNode }) => (
+                                <span title={`${what} set by HR`} style={HR_CHIP}>{children}</span>
                             );
-                        })}
+                            return (
+                                <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, overflow: 'hidden' }}>
+                                    <div style={{ display: 'grid', gridTemplateColumns: GRID, gap: 8, padding: '9px 14px', background: '#f9fafb', borderBottom: '1px solid #e5e7eb', fontSize: 10.5, fontWeight: 600, color: '#6b7280', textTransform: 'uppercase', letterSpacing: 0.4 }}>
+                                        <span>Type</span>
+                                        <span style={{ textAlign: 'right' }}>Used</span>
+                                        <span style={{ textAlign: 'right' }}>Limit</span>
+                                        <span style={{ textAlign: 'right' }}>Left</span>
+                                    </div>
+                                    {rows.map((lType, idx) => {
+                                        const limit = currentStats.getLimit(lType);
+                                        const balance = currentStats.getBalance(lType);
+                                        const used = currentStats.getUsed(lType);
+                                        const isCustomLimit = selectedEmployee?.customLeaveLimits?.[lType] !== undefined;
+                                        const isCustomUsed = selectedEmployee?.customLeaveUsed?.[lType] !== undefined;
+                                        const isUnlimited = limit > 9000;
+                                        const hasRule = lType === 'Annual' || lType === 'Maternity';
+                                        const eligible = isCustomLimit || (lType === 'Annual' ? currentStats.isEligibleForAnnual : lType === 'Maternity' ? currentStats.isEligibleForMaternity : true);
+                                        const locked = hasRule && !eligible;
+                                        const low = !isUnlimited && !locked && balance < 2;
+                                        // Maternity / Other: "Left" and the bar stay blank until at least one such leave is taken
+                                        // (an approved record counts even when it is hourly and adds 0 days)
+                                        const notTaken = (lType === 'Maternity' || lType === 'Other') && used === 0
+                                            && !leaves.some(l => l.employeeId === selectedEmployee?.id && l.type === lType && l.status === 'Approved');
+                                        return (
+                                            <div key={lType} style={{ padding: '10px 14px', borderBottom: idx < rows.length - 1 ? '1px solid #f1f5f9' : 'none', opacity: locked ? 0.6 : 1 }}>
+                                                <div style={{ display: 'grid', gridTemplateColumns: GRID, gap: 8, alignItems: 'center', fontSize: 13, fontVariantNumeric: 'tabular-nums' }}>
+                                                    <span style={{ fontWeight: 600, color: '#111827', display: 'flex', alignItems: 'center', flexWrap: 'wrap', columnGap: 6, minWidth: 0 }}>
+                                                        {lType}
+                                                        {hasRule && <span style={{ fontSize: 11, fontWeight: 500, color: eligible ? '#15803d' : '#6b7280', whiteSpace: 'nowrap' }}>{eligible ? '(Eligible)' : '(Not eligible)'}</span>}
+                                                    </span>
+                                                    <span style={{ textAlign: 'right', color: '#374151' }}>{isCustomUsed ? <HrNum what="Used days">{currentStats.fmt(used)}</HrNum> : currentStats.fmt(used)}</span>
+                                                    <span style={{ textAlign: 'right', color: '#6b7280' }}>{isUnlimited ? '∞' : locked ? '—' : isCustomLimit ? <HrNum what="Limit">{currentStats.fmt(limit)}</HrNum> : currentStats.fmt(limit)}</span>
+                                                    <span style={{ textAlign: 'right' }}>
+                                                        {notTaken || isUnlimited ? '' : locked ? <span style={{ color: '#6b7280' }}>—</span> : (
+                                                            // days left in a filled round badge — blue, red when under 2 days
+                                                            <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 26, height: 26, padding: '0 8px', boxSizing: 'border-box', borderRadius: 999, background: low ? '#dc2626' : '#1d4ed8', color: '#fff', fontSize: 12.5, fontWeight: 700 }}>
+                                                                {currentStats.fmt(balance)}
+                                                            </span>
+                                                        )}
+                                                    </span>
+                                                </div>
+                                                {!isUnlimited && !locked && !notTaken && (
+                                                    <div style={{ height: 5, background: '#e5e7eb', borderRadius: 999, marginTop: 7, overflow: 'hidden' }}>
+                                                        <div style={{ height: '100%', borderRadius: 999, background: low ? '#ef4444' : '#16a34a', width: `${limit > 0 ? Math.min((used / limit) * 100, 100) : 0}%` }} />
+                                                    </div>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                    {anyCustom && (
+                                        <div style={{ padding: '7px 14px', borderTop: '1px solid #f1f5f9', fontSize: 11, color: '#6b7280', display: 'flex', alignItems: 'center', gap: 6 }}>
+                                            <span style={{ ...HR_CHIP, fontSize: 10 }}>12</span> Set by HR
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })()}
                     </div>
 
                     {/* Leave History & Actions */}
@@ -1361,7 +1401,8 @@ export const LeaveManagement: React.FC = () => {
                                                                     </span>
                                                                     {!isStaff && isPending && (
                                                                         <button
-                                                                            onClick={() => updateLeave(leave.id, { hardCopyCollected: false })}
+                                                                            onClick={() => updateLeave(leave.id, HR_SIGN_UNDO)}
+                                                                            title="Undo (removes the HR signature)"
                                                                             style={{ fontSize: '10px', color: '#94a3b8', background: 'transparent', border: '1px solid #e2e8f0', borderRadius: '5px', padding: '1px 6px', cursor: 'pointer' }}
                                                                         >
                                                                             Undo
@@ -1375,7 +1416,14 @@ export const LeaveManagement: React.FC = () => {
                                                                     </span>
                                                                     {!isStaff && (
                                                                         <button
-                                                                            onClick={() => updateLeave(leave.id, { hardCopyCollected: true })}
+                                                                            onClick={async () => {
+                                                                                // Confirm By HR = sign as HR: pick a signature and enter its PIN
+                                                                                const patch = await signAsHr({ signatures, user: currentUser, subject: `${selectedEmployee?.name ?? 'this leave'} · ${leave.startDate}` });
+                                                                                if (!patch) return;
+                                                                                updateLeave(leave.id, patch);
+                                                                                toast.success(`Form received — signed by ${signatures.find(s => s.id === patch.hrSignatureId)?.name ?? 'HR'}`);
+                                                                            }}
+                                                                            title="Sign as HR (signature + PIN)"
                                                                             style={{ fontSize: '10px', color: '#374151', background: 'transparent', border: '1px solid #d1d5db', borderRadius: '5px', padding: '1px 6px', cursor: 'pointer' }}
                                                                         >
                                                                             Confirm By HR
@@ -1388,15 +1436,16 @@ export const LeaveManagement: React.FC = () => {
                                                 })()}
                                             </div>
                                             <div className="flex items-center gap-1 shrink-0">
-                                                <Button
-                                                    size="icon"
-                                                    variant="ghost"
-                                                    className="h-8 w-8 text-blue-700 hover:bg-blue-50 hover:text-blue-800"
-                                                    title="View leave request form"
+                                                <button
+                                                    type="button"
+                                                    title="Open the Leave Request Form"
                                                     onClick={() => openLeaveForm(leave)}
+                                                    style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 30, padding: '0 12px', borderRadius: 6, border: '1px solid #bfdbfe', background: '#fff', color: '#1d4ed8', fontSize: 12, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}
+                                                    onMouseEnter={e => (e.currentTarget.style.background = '#eff6ff')}
+                                                    onMouseLeave={e => (e.currentTarget.style.background = '#fff')}
                                                 >
-                                                    <Eye className="h-4 w-4" />
-                                                </Button>
+                                                    <Eye className="h-3.5 w-3.5" /> View Form
+                                                </button>
                                                 {/* Admin approve/reject buttons for Pending */}
                                                 {!isStaff && isPending && (
                                                     <>
@@ -1404,10 +1453,13 @@ export const LeaveManagement: React.FC = () => {
                                                             size="icon"
                                                             variant="ghost"
                                                             className="h-8 w-8 text-green-600 hover:bg-green-50 hover:text-green-700"
-                                                            title="Approve"
-                                                            onClick={() => {
-                                                                updateLeave(leave.id, { status: 'Approved' });
-                                                                toast.success('Leave approved');
+                                                            title="Approve (signature + PIN)"
+                                                            onClick={async () => {
+                                                                // A leave is only approved once the approver signs with signature + PIN
+                                                                const patch = await signToApprove({ signatures, user: currentUser, subject: `${selectedEmployee?.name ?? 'this employee'} · ${leave.type} · ${leave.startDate}${leave.endDate !== leave.startDate ? ` to ${leave.endDate}` : ''}` });
+                                                                if (!patch) return;
+                                                                updateLeave(leave.id, patch);
+                                                                toast.success(`Leave approved — signed by ${signatures.find(s => s.id === patch.approvedSignatureId)?.name ?? 'approver'}`);
                                                             }}
                                                         >
                                                             <Check className="h-4 w-4" />
@@ -1497,7 +1549,7 @@ export const LeaveManagement: React.FC = () => {
                         </TableRow>
                     </TableHeader>
                     <TableBody>
-                        {employees.filter(e => e.status === 'Active' && (!isStaff || e.id === currentUser?.id)).map(emp => {
+                        {employees.filter(e => e.status === 'Active' && (!isStaff || e.id === currentUser?.id)).sort(byEid).map(emp => {
                             const stats = calculateEmployeeLeaveStats(emp);
                             const isSelected = selectedForTransfer.has(emp.id);
 

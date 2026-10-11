@@ -10,7 +10,7 @@ export type PdfPart =
   | { kind: 'image'; dataUrl: string; fit: 'bleed' | 'margin' } // 'bleed' = the image already has its own margins (the form sheet)
   | { kind: 'pdf'; dataUrl: string };
 
-function dataUrlToBytes(dataUrl: string): Uint8Array {
+export function dataUrlToBytes(dataUrl: string): Uint8Array {
   const b64 = dataUrl.slice(dataUrl.indexOf(',') + 1);
   const bin = atob(b64);
   const out = new Uint8Array(bin.length);
@@ -32,10 +32,23 @@ async function addImagePage(doc: PDFDocument, dataUrl: string, fit: 'bleed' | 'm
   page.drawImage(img, { x: (A4[0] - w) / 2, y: (A4[1] - h) / 2, width: w, height: h });
 }
 
+/** Each page of an uploaded PDF, scaled (still vector) onto its own A4 page so the whole file is A4.
+ *  A rotated page, or one pdf-lib cannot embed, is copied unchanged rather than risk it coming out sideways or blank. */
 async function addPdfPages(doc: PDFDocument, dataUrl: string) {
   const src = await PDFDocument.load(dataUrlToBytes(dataUrl), { ignoreEncryption: true });
-  const pages = await doc.copyPages(src, src.getPageIndices());
-  for (const p of pages) doc.addPage(p);
+  for (const i of src.getPageIndices()) {
+    const srcPage = src.getPage(i);
+    try {
+      if (srcPage.getRotation().angle % 360 !== 0) throw new Error('rotated');
+      const [embedded] = await doc.embedPdf(src, [i]);
+      const scale = Math.min(A4[0] / embedded.width, A4[1] / embedded.height);
+      const w = embedded.width * scale, h = embedded.height * scale;
+      doc.addPage(A4).drawPage(embedded, { x: (A4[0] - w) / 2, y: (A4[1] - h) / 2, width: w, height: h });
+    } catch {
+      const [copied] = await doc.copyPages(src, [i]);
+      doc.addPage(copied);
+    }
+  }
 }
 
 /** Assemble the parts in order into a single PDF and return its bytes. */

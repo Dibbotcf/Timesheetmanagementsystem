@@ -1,6 +1,7 @@
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { useAppStore, Employee, Signature } from '../App';
-import { Plus, Search, MoreHorizontal, Pencil, Trash2, Eye, Upload, Image as ImageIcon, Cake, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, Search, MoreHorizontal, Pencil, Trash2, Eye, Upload, Image as ImageIcon, Cake, ChevronLeft, ChevronRight, KeyRound } from 'lucide-react';
+import { fetchSignaturePins, SetPinDialog, type SignaturePin } from '../components/SignaturePin';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import {
@@ -47,7 +48,7 @@ const roleBadge = (role: string) =>
   : { bg: '#f1f5f9', fg: '#475569' };
 
 export const Employees: React.FC = () => {
-  const { employees, addEmployee, updateEmployee, deleteEmployee, signatures, addSignature, deleteSignature } = useAppStore();
+  const { employees, addEmployee, updateEmployee, deleteEmployee, signatures, addSignature, updateSignature, deleteSignature, currentUser } = useAppStore();
   const [search, setSearch] = useState('');
   
   // --- Employee State ---
@@ -197,6 +198,30 @@ export const Employees: React.FC = () => {
   };
 
   // --- Signature Logic ---
+  // A signature linked to an employee (shown by EID) is that person's own — it fills the
+  // "Maker Signature" on their leave forms. One signature per employee.
+  const employeesByEid = useMemo(() => [...employees].sort((a, b) =>
+    a.eid.localeCompare(b.eid, undefined, { numeric: true, sensitivity: 'base' })), [employees]);
+  const signatureOf = useMemo(() => new Map(signatures.filter(s => s.employeeId).map(s => [s.employeeId!, s.id])), [signatures]);
+  const linkedEmployee = (sig: Signature) => employees.find(e => e.id === sig.employeeId);
+
+  // Signature PINs (needed to sign as HR). The Superadmin sees and manages every signature's PIN;
+  // anyone else only their own signature's (the one linked to their employee record).
+  const isSuperadmin = currentUser?.role === 'Superadmin';
+  const [pins, setPins] = useState<Record<string, SignaturePin> | null>(null);
+  const [pinDialog, setPinDialog] = useState<{ sig: Signature; mode: 'own' | 'admin' } | null>(null);
+  const loadPins = () => fetchSignaturePins().then(setPins).catch(() => setPins({}));
+  useEffect(() => { loadPins(); }, []);
+  const canManagePin = (sig: Signature) => isSuperadmin || (!!sig.employeeId && sig.employeeId === currentUser?.id);
+  const pinCount = pins ? signatures.filter(s => pins[s.id]).length : 0;
+
+  const linkSignature = async (sig: Signature, employeeId: string) => {
+    const emp = employees.find(e => e.id === employeeId);
+    if (await updateSignature(sig.id, { employeeId: employeeId || undefined })) {
+      toast.success(emp ? `${sig.name}'s signature linked to ${emp.eid}` : `${sig.name}'s signature unlinked`);
+    }
+  };
+
   const handleOpenAddSig = () => {
     setSigFormData({});
     setIsSigDialogOpen(true);
@@ -223,7 +248,7 @@ export const Employees: React.FC = () => {
       toast.error('Please fill in all fields and upload a signature image.');
       return;
     }
-    addSignature(sigFormData as Omit<Signature, 'id'>);
+    addSignature({ ...sigFormData, employeeId: sigFormData.employeeId || undefined } as Omit<Signature, 'id'>);
     toast.success('Signature added successfully');
     setIsSigDialogOpen(false);
     setSigFormData({});
@@ -460,7 +485,16 @@ export const Employees: React.FC = () => {
 
         {/* Signatures Tab */}
         <TabsContent value="signatures" className="space-y-4 mt-4">
-           <div className="flex justify-end">
+           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <p className="text-sm text-gray-500">Link a signature to its employee (EID) and it is added automatically as the <b>Maker Signature</b> on their leave forms.</p>
+              <p className="text-sm text-gray-500">Signing as HR (<b>Confirm By HR</b>) needs the signature's 4-digit PIN.</p>
+            </div>
+            {isSuperadmin && pins && (
+              <span className="px-3 py-1 rounded-full whitespace-nowrap" style={{ background: pinCount === signatures.length ? '#15803d' : '#b45309', color: '#fff', fontSize: 12, fontWeight: 600 }}>
+                PIN set: {pinCount} of {signatures.length}
+              </span>
+            )}
             <Button onClick={handleOpenAddSig} className="w-full sm:w-auto bg-blue-900 hover:bg-blue-800">
               <Plus className="mr-2 h-4 w-4" /> Add Signature
             </Button>
@@ -478,10 +512,45 @@ export const Employees: React.FC = () => {
                     )}
                   </div>
                   <div>
-                    <h3 className="font-bold text-lg">{sig.name}</h3>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="font-bold text-lg">{sig.name}</h3>
+                      {linkedEmployee(sig)
+                        ? <span className="px-3 py-1 rounded-full" style={{ background: '#1e3a8a', color: '#fff', fontSize: 11, fontWeight: 600 }}>{linkedEmployee(sig)!.eid}</span>
+                        : <span className="px-3 py-1 rounded-full" style={{ background: '#9ca3af', color: '#fff', fontSize: 11, fontWeight: 600 }}>No EID</span>}
+                    </div>
                     <p className="text-sm text-gray-500">{sig.role}</p>
                   </div>
-                  <div className="flex justify-end">
+                  {canManagePin(sig) && pins && (
+                    <div className="flex items-center justify-between gap-2" style={{ padding: '8px 10px', borderRadius: 8, background: '#f9fafb', border: '1px solid #f1f5f9' }}>
+                      <span className="flex items-center gap-2" style={{ fontSize: 12, color: '#374151' }}>
+                        <KeyRound className="h-3.5 w-3.5" style={{ color: '#6b7280' }} /> PIN
+                        {pins[sig.id]
+                          ? <span className="px-3 py-1 rounded-full" style={{ background: '#15803d', color: '#fff', fontSize: 11, fontWeight: 600 }}>Set</span>
+                          : <span className="px-3 py-1 rounded-full" style={{ background: '#9ca3af', color: '#fff', fontSize: 11, fontWeight: 600 }}>Not set</span>}
+                      </span>
+                      <button type="button" onClick={() => setPinDialog({ sig, mode: isSuperadmin ? 'admin' : 'own' })}
+                        style={{ height: 28, padding: '0 10px', borderRadius: 6, border: '1px solid #bfdbfe', background: '#fff', color: '#1d4ed8', fontSize: 12, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                        {!pins[sig.id] ? 'Set PIN' : isSuperadmin ? 'Reset PIN' : 'Change PIN'}
+                      </button>
+                    </div>
+                  )}
+                  <div className="flex items-end justify-between gap-2">
+                    <label className="flex flex-col gap-1 min-w-0 flex-1" style={{ fontSize: 11, color: '#6b7280' }}>
+                      Employee (EID)
+                      <select
+                        value={sig.employeeId || ''}
+                        onChange={e => linkSignature(sig, e.target.value)}
+                        aria-label={`Employee for ${sig.name}'s signature`}
+                        className="h-8 rounded-md border border-gray-200 bg-white px-2 cursor-pointer"
+                        style={{ fontSize: 12, color: '#111827', maxWidth: 230 }}
+                      >
+                        <option value="">Not linked</option>
+                        {employeesByEid.map(e => {
+                          const taken = signatureOf.has(e.id) && signatureOf.get(e.id) !== sig.id;
+                          return <option key={e.id} value={e.id} disabled={taken}>{e.eid} · {e.name}{taken ? ' (has a signature)' : ''}</option>;
+                        })}
+                      </select>
+                    </label>
                     <Button variant="destructive" size="sm" onClick={() => handleSigDeleteClick(sig.id)}>
                       <Trash2 className="h-4 w-4 mr-2" /> Delete
                     </Button>
@@ -702,6 +771,11 @@ export const Employees: React.FC = () => {
         </AlertDialogContent>
       </AlertDialog>
 
+      {pinDialog && (
+        <SetPinDialog signature={pinDialog.sig} mode={pinDialog.mode} current={pins?.[pinDialog.sig.id]} user={currentUser}
+          onClose={() => setPinDialog(null)} onSaved={loadPins} />
+      )}
+
       {/* Signature Dialogs */}
       <Dialog open={isSigDialogOpen} onOpenChange={setIsSigDialogOpen}>
         <DialogContent>
@@ -712,6 +786,24 @@ export const Employees: React.FC = () => {
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleSigSubmit} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="sigEmployee">Employee (EID)</Label>
+              <select
+                id="sigEmployee"
+                value={sigFormData.employeeId || ''}
+                onChange={e => {
+                  const emp = employees.find(x => x.id === e.target.value);
+                  setSigFormData(prev => ({ ...prev, employeeId: e.target.value || undefined, name: prev.name || emp?.name || '' }));
+                }}
+                className="flex h-9 w-full rounded-md border border-gray-200 bg-white px-3 text-sm cursor-pointer"
+              >
+                <option value="">Not an employee / not linked</option>
+                {employeesByEid.map(e => (
+                  <option key={e.id} value={e.id} disabled={signatureOf.has(e.id)}>{e.eid} · {e.name}{signatureOf.has(e.id) ? ' (has a signature)' : ''}</option>
+                ))}
+              </select>
+              <p className="text-xs text-gray-500">Linked signatures appear as the Maker Signature on that employee's leave forms.</p>
+            </div>
             <div className="space-y-2">
               <Label htmlFor="sigName">Signatory Name <span className="text-red-500">*</span></Label>
               <Input 

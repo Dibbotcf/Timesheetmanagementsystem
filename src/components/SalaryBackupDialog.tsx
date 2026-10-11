@@ -41,11 +41,7 @@ export const SalaryBackupDialog: React.FC<{
 
   const load = () => fetchTrash().then(list => { setItems(list); onCountChange?.(list.length); });
   useEffect(() => { load(); }, []);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  // Closes only through its ✕ (app-wide rule: no outside click / Escape)
 
   const title = (s: SalarySheet) => `${MONTH_NAMES[s.month]} ${s.year} Salary Sheet`;
 
@@ -88,7 +84,7 @@ export const SalaryBackupDialog: React.FC<{
   });
 
   return (
-    <div role="dialog" aria-modal="true" aria-labelledby="salary-backup-title" onClick={onClose}
+    <div role="dialog" aria-modal="true" aria-labelledby="salary-backup-title"
       style={{ position: 'fixed', inset: 0, zIndex: 70, background: 'rgba(15,23,42,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, fontFamily: FONT }}>
       <div onClick={e => e.stopPropagation()}
         style={{ background: '#fff', borderRadius: 14, width: 780, maxWidth: '100%', maxHeight: 'calc(100vh - 32px)', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 50px rgba(15,23,42,0.25)' }}>

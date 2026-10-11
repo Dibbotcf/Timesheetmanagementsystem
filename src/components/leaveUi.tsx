@@ -75,6 +75,8 @@ export const Label: React.FC<{ children: React.ReactNode }> = ({ children }) => 
 export const card: React.CSSProperties = { background: C.panel, border: `1px solid ${C.line}`, borderRadius: 12 };
 export const th: React.CSSProperties = { textAlign: 'left', padding: '10px 10px', fontSize: 12, fontWeight: 600, color: C.body, background: '#f9fafb', borderBottom: `1px solid ${C.line}`, whiteSpace: 'nowrap', overflow: 'hidden' };
 export const td: React.CSSProperties = { padding: '11px 10px', verticalAlign: 'middle', borderBottom: `1px solid ${C.line}`, fontSize: 13, color: C.body };
+/** Vertical line on a column's left edge — spread into th/td of every column after the first data column. */
+export const colLine: React.CSSProperties = { borderLeft: `1px solid ${C.line}` };
 
 export const fmtQty = (l: LeaveRecord) => l.partialHours ? `${l.partialHours} Hour${l.partialHours !== 1 ? 's' : ''}` : `${l.days} Day${l.days !== 1 ? 's' : ''}`;
 

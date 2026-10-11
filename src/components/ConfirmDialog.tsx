@@ -29,15 +29,13 @@ const Dialog: React.FC<ConfirmOptions & { onDone: (ok: boolean) => void }> = ({ 
   const t = TONES[tone];
   const Icon = ICONS[icon || (tone === 'danger' ? 'warning' : 'question')];
 
+  // Closes only through its ✕ / Cancel / confirm buttons — not an outside click or Escape (app-wide rule)
   useEffect(() => {
     cancelRef.current?.focus(); // safe default: Enter on open = Cancel
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); onDone(false); } };
-    window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
-  }, [onDone]);
+  }, []);
 
   return (
-    <div role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-message" onClick={() => onDone(false)}
+    <div role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-message"
       style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(15,23,42,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, fontFamily: FONT, animation: 'confirm-fade 120ms ease-out' }}>
       <style>{`@keyframes confirm-fade { from { opacity: 0 } to { opacity: 1 } } @keyframes confirm-pop { from { transform: translateY(6px) scale(.98); opacity: 0 } to { transform: none; opacity: 1 } }
         @media (prefers-reduced-motion: reduce) { [role=alertdialog], [role=alertdialog] > div { animation: none !important } }`}</style>
@@ -94,12 +92,7 @@ export interface ChooseDownloadOptions {
 
 const ChoiceDialog: React.FC<ChooseDownloadOptions & { onDone: (c: DownloadChoice | null) => void }> = ({ title, subtitle, all, separate, onDone }) => {
   const firstRef = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
-    firstRef.current?.focus();
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); onDone(null); } };
-    window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
-  }, [onDone]);
+  useEffect(() => { firstRef.current?.focus(); }, []); // closes only through ✕ / Cancel / an option
   const Option: React.FC<{ choice: DownloadChoice; icon: React.FC<any>; label: string; description: string; btnRef?: React.Ref<HTMLButtonElement> }> = ({ choice, icon: Icon, label, description, btnRef }) => (
     <button ref={btnRef} onClick={() => onDone(choice)}
       style={{ display: 'flex', alignItems: 'center', gap: 14, width: '100%', textAlign: 'left', padding: '14px 16px', borderRadius: 10, border: '1px solid #e5e7eb', background: '#fff', cursor: 'pointer', fontFamily: FONT }}
@@ -116,7 +109,7 @@ const ChoiceDialog: React.FC<ChooseDownloadOptions & { onDone: (c: DownloadChoic
     </button>
   );
   return (
-    <div role="dialog" aria-modal="true" aria-labelledby="choice-title" onClick={() => onDone(null)}
+    <div role="dialog" aria-modal="true" aria-labelledby="choice-title"
       style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(15,23,42,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, fontFamily: FONT }}>
       <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 14, width: 440, maxWidth: '100%', boxShadow: '0 20px 50px rgba(15,23,42,0.25)', position: 'relative', padding: '20px 20px 16px' }}>
         <button aria-label="Close" onClick={() => onDone(null)}

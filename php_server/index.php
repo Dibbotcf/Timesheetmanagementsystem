@@ -490,7 +490,7 @@ if ($parts[0] === 'backups') {
             'employees', 'templates', 'folders', 'timesheets',
             'signatures', 'leaves', 'ot_records', 'report_folders',
             'saved_reports', 'leave_folders', 'saved_leave_reports',
-            'salary_sheets', 'salary_access', 'salary_trash'
+            'salary_sheets', 'salary_access', 'salary_trash', 'signature_pins'
         ];
         
         $backupContent = [

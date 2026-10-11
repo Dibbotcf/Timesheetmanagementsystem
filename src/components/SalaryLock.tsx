@@ -60,14 +60,10 @@ const inputCss = (error?: boolean): React.CSSProperties => ({
   width: '100%', height: 40, borderRadius: 8, border: `1px solid ${error ? '#fca5a5' : C.line}`, padding: '0 40px 0 12px',
   fontSize: 14, fontFamily: FONT, outline: 'none', color: C.ink, background: '#fff',
 });
-const Overlay: React.FC<{ onClose: () => void; labelledBy: string; children: React.ReactNode }> = ({ onClose, labelledBy, children }) => {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+// Closes only through its own ✕ / Cancel buttons — a stray click outside or Escape doesn't lose a typed password.
+const Overlay: React.FC<{ labelledBy: string; children: React.ReactNode }> = ({ labelledBy, children }) => {
   return (
-    <div role="dialog" aria-modal="true" aria-labelledby={labelledBy} onClick={onClose}
+    <div role="dialog" aria-modal="true" aria-labelledby={labelledBy}
       style={{ position: 'fixed', inset: 0, zIndex: 70, background: 'rgba(15,23,42,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, fontFamily: FONT }}>
       {children}
     </div>
@@ -149,7 +145,7 @@ export const SalaryLock: React.FC<{ currentUserId?: string; onUnlock: () => void
   };
 
   return (
-    <Overlay onClose={onCancel} labelledBy="salary-lock-title">
+    <Overlay labelledBy="salary-lock-title">
       <Card onSubmit={submit} onClose={onCancel} icon={<Lock style={{ width: 20, height: 20 }} />} title="Salary & Payslips is locked" titleId="salary-lock-title" subtitle="Enter your password to open it.">
         <PasswordField id="salary-password" label="Password" value={pw} onChange={v => { setPw(v); setError(''); }} error={!!error} autoFocus describedBy={error ? 'salary-password-error' : undefined} />
         {error && <div id="salary-password-error" role="alert" style={{ fontSize: 12.5, color: C.red, marginTop: 6 }}>{error}</div>}
@@ -239,7 +235,7 @@ const ChangeOwnPassword: React.FC<{ currentUser: Employee | null; onClose: () =>
     finally { setBusy(false); }
   };
   return (
-    <Overlay onClose={onClose} labelledBy="salary-pw-title">
+    <Overlay labelledBy="salary-pw-title">
       <Card onSubmit={save} onClose={onClose} icon={<KeyRound style={{ width: 20, height: 20 }} />} title="My salary password" titleId="salary-pw-title" subtitle="Reset the password you use to open Salary & Payslips. Only you can change it.">
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 14, padding: '10px 12px', borderRadius: 10, background: '#f8fafc', border: `1px solid ${C.line}` }}>
           <Avatar name={currentUser?.name} />
@@ -375,7 +371,7 @@ const AccessManager: React.FC<{ employees: Employee[]; currentUser: Employee | n
   );
 
   return (
-    <Overlay onClose={onClose} labelledBy="salary-pw-title">
+    <Overlay labelledBy="salary-pw-title">
       <div onClick={e => e.stopPropagation()}
         style={{ background: '#fff', borderRadius: 14, width: 580, maxWidth: '100%', maxHeight: 'calc(100vh - 32px)', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 50px rgba(15,23,42,0.25)', position: 'relative' }}>
         <button type="button" aria-label="Close" onClick={onClose}

@@ -657,7 +657,7 @@ export const ZKTAttendanceReport: React.FC<{ onBack: () => void }> = ({ onBack }
 
       {/* ── Add/Edit Modal ── */}
       {modal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => setModal(null)}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ background: '#fff', borderRadius: '16px', width: '420px', boxShadow: '0 20px 60px rgba(0,0,0,0.2)', overflow: 'hidden' }} onClick={e => e.stopPropagation()}>
             {/* Modal header */}
             <div style={{ background: 'linear-gradient(135deg, #4c1d95 0%, #7c3aed 100%)', padding: '18px 22px', display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -724,7 +724,7 @@ export const ZKTAttendanceReport: React.FC<{ onBack: () => void }> = ({ onBack }
 
       {/* ── Delete Confirm Modal ── */}
       {confirmDelete && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => setConfirmDelete(null)}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ background: '#fff', borderRadius: '16px', width: '380px', boxShadow: '0 20px 60px rgba(0,0,0,0.2)', overflow: 'hidden' }} onClick={e => e.stopPropagation()}>
             <div style={{ padding: '24px 24px 0', textAlign: 'center' }}>
               <div style={{ background: '#fef2f2', borderRadius: '50%', width: '56px', height: '56px', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 14px' }}>
@@ -750,7 +750,7 @@ export const ZKTAttendanceReport: React.FC<{ onBack: () => void }> = ({ onBack }
 
       {/* ── Time Edit Modal (Superadmin only) ── */}
       {isSuperAdmin && timeEdit && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => setTimeEdit(null)}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ background: '#fff', borderRadius: '16px', width: '380px', boxShadow: '0 20px 60px rgba(0,0,0,0.2)', overflow: 'hidden' }} onClick={e => e.stopPropagation()}>
             <div style={{ background: '#111827', padding: '16px 20px', display: 'flex', alignItems: 'center', gap: '10px' }}>
               <Pencil size={16} color="#fff" />
@@ -797,7 +797,7 @@ export const ZKTAttendanceReport: React.FC<{ onBack: () => void }> = ({ onBack }
 
       {/* ── Device Config Modal (Superadmin only) ── */}
       {isSuperAdmin && cfgEdit && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => setCfgEdit(null)}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ background: '#fff', borderRadius: '16px', width: '380px', boxShadow: '0 20px 60px rgba(0,0,0,0.2)', overflow: 'hidden' }} onClick={e => e.stopPropagation()}>
             <div style={{ background: '#111827', padding: '16px 20px', display: 'flex', alignItems: 'center', gap: '10px' }}>
               <Pencil size={16} color="#fff" />

@@ -44,12 +44,7 @@ export const SalaryEmployeePicker: React.FC<Props> = ({ year, month, employees, 
   const [busy, setBusy] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => { searchRef.current?.focus(); }, []);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !busy) onCancel(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [busy, onCancel]);
+  useEffect(() => { searchRef.current?.focus(); }, []); // closes only through ✕ / Cancel (app-wide rule)
 
   const shown = list.filter(e => {
     const t = q.trim().toLowerCase();
@@ -67,7 +62,7 @@ export const SalaryEmployeePicker: React.FC<Props> = ({ year, month, employees, 
   };
 
   return (
-    <div role="dialog" aria-modal="true" aria-labelledby="picker-title" onClick={() => !busy && onCancel()}
+    <div role="dialog" aria-modal="true" aria-labelledby="picker-title"
       style={{ position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(15,23,42,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, fontFamily: FONT }}>
       <div onClick={e => e.stopPropagation()}
         style={{ background: '#fff', borderRadius: 14, width: 520, maxWidth: '100%', maxHeight: 'calc(100vh - 32px)', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 50px rgba(15,23,42,0.25)' }}>
