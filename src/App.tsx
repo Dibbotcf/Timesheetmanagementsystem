@@ -105,6 +105,7 @@ export interface Employee {
   dob: string;
   joiningDate: string;
   gender?: 'Male' | 'Female' | 'Other';
+  photoUrl?: string;  // profile photo: square JPEG data URL (~320 px), uploaded from My Profile
   customLeaveLimits?: Partial<Record<LeaveType, number>>;
   customLeaveUsed?: Partial<Record<LeaveType, number>>;
   limitHistory?: {
@@ -981,8 +982,9 @@ export default function App() {
 
 // --- Layout Component ---
 const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { currentUser, logout, previewData, disablePreview, issues, leaves, otRecords } = useAppStore();
+  const { currentUser, logout, previewData, disablePreview, issues, leaves, otRecords, employees } = useAppStore();
   const [profileOpen, setProfileOpen] = useState(false); // "My profile" dialog from the sidebar user card
+  const myPhoto = employees.find(e => e.id === currentUser?.id)?.photoUrl; // from the live record, not the login snapshot
   const isAdminUser = currentUser?.role === 'Admin/HR' || currentUser?.role === 'Superadmin';
   const pendingIssueCount = isAdminUser
     ? issues.filter(i => i.status === 'Open').length
@@ -1094,8 +1096,8 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
             style={{ background: 'transparent', border: 'none', borderRadius: 10, padding: 6, margin: '-6px -6px 10px', width: 'calc(100% + 12px)', cursor: 'pointer', transition: 'background .15s' }}
             onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.08)'; }}
             onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}>
-            <div className="h-10 w-10 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold" style={{ flexShrink: 0 }}>
-              {currentUser?.name.charAt(0)}
+            <div className="h-10 w-10 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold" style={{ flexShrink: 0, overflow: 'hidden' }}>
+              {myPhoto ? <img src={myPhoto} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : currentUser?.name.charAt(0)}
             </div>
             <div className="overflow-hidden" style={{ flex: 1, minWidth: 0 }}>
               <p className="text-sm font-medium truncate">{currentUser?.name}</p>

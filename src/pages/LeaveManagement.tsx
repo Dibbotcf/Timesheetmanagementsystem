@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -11,6 +11,7 @@ import { Calendar as CalendarIcon, Plus, Trash2, User, AlertCircle, Settings, Re
 import { Checkbox } from '../components/ui/checkbox';
 import { useAppStore, LeaveType, LeaveRequest, LeaveRecord, Employee, SavedLeaveReport } from '../App';
 import { signAsHr, signToApprove, HR_SIGN_UNDO } from '../components/SignaturePin';
+import { AnimatedSearch } from '../components/AnimatedSearch';
 import { toast } from 'sonner@2.0.3';
 import { format, differenceInDays, parseISO, addYears, differenceInYears } from 'date-fns';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
@@ -35,40 +36,8 @@ const SELECTED_TYPE_COLOR = '#2563eb'; // single blue for the chosen tile, badge
 // Words that usually mean the leave should be Sick, not Casual — used only for a soft warning
 const ILLNESS_WORDS = /\b(sick|ill|illness|fever|flu|cold|doctor|hospital|clinic|medical|medicine|headache|pain|unwell|surgery|injur)/i;
 
-// Employee-board search: always shown in its active look; while empty, the hint types itself out and cycles.
+// Employee-board search hints (AnimatedSearch types them out while the box is empty)
 const SEARCH_HINTS = ['Search by name, EID or designation…', 'Try a name — e.g. Rabeya', 'Try an EID — e.g. TCF-52'];
-const BoardSearch: React.FC<{ value: string; onChange: (v: string) => void }> = ({ value, onChange }) => {
-    const [hint, setHint] = useState(SEARCH_HINTS[0]);
-    useEffect(() => {
-        if (value) return; // no animation while something is typed
-        if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) { setHint(SEARCH_HINTS[0]); return; }
-        let phrase = 0, len = 0, erasing = false, timer = 0;
-        const tick = () => {
-            const full = SEARCH_HINTS[phrase];
-            len += erasing ? -1 : 1;
-            setHint(full.slice(0, len) + '▏');
-            if (!erasing && len === full.length) { erasing = true; timer = window.setTimeout(tick, 1800); return; } // hold the full line
-            if (erasing && len === 0) { erasing = false; phrase = (phrase + 1) % SEARCH_HINTS.length; timer = window.setTimeout(tick, 350); return; }
-            timer = window.setTimeout(tick, erasing ? 25 : 55);
-        };
-        timer = window.setTimeout(tick, 300);
-        return () => window.clearTimeout(timer);
-    }, [value]);
-    return (
-        <div style={{ position: 'relative', width: 520, maxWidth: '100%' }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2563eb" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ position: 'absolute', left: 13, top: 12 }}>
-                <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" />
-            </svg>
-            <input value={value} onChange={e => onChange(e.target.value)} placeholder={hint} aria-label="Search employees by name, EID or designation" autoFocus
-                style={{ width: '100%', height: 40, borderRadius: 10, border: '1px solid #3b82f6', padding: '0 36px', fontSize: 13.5, outline: 'none', background: '#fff', boxShadow: '0 0 0 4px rgba(59,130,246,0.15)' }} />
-            <button type="button" aria-label="Clear search" onMouseDown={e => e.preventDefault()} onClick={() => onChange('')}
-                style={{ position: 'absolute', right: 8, top: 8, width: 24, height: 24, borderRadius: 999, border: 'none', background: '#e5e7eb', color: '#4b5563', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
-                    opacity: value ? 1 : 0, transform: value ? 'scale(1)' : 'scale(.6)', pointerEvents: value ? 'auto' : 'none', transition: 'opacity .15s, transform .15s' }}>
-                <X className="h-3.5 w-3.5" />
-            </button>
-        </div>
-    );
-};
 
 export const LeaveManagement: React.FC = () => {
   const { employees, leaves, addLeave, updateLeave, deleteLeave, updateEmployee, deleteEmployee, currentUser, leaveFolders, addLeaveFolder, deleteLeaveFolder, savedLeaveReports, addSavedLeaveReport, deleteSavedLeaveReport, getItem, templates, signatures } = useAppStore();
@@ -370,16 +339,9 @@ export const LeaveManagement: React.FC = () => {
       return;
     }
 
-    // Admin/HR and Superadmin records are approved on the spot, so they must be signed first (signature + PIN).
-    // Cancelled or wrong PIN → nothing is recorded.
-    // The Record Leave dialog steps aside while signing (it would hold the keyboard focus), and comes back
-    // with everything still filled in if signing is cancelled or the save fails.
-    let approval: Partial<LeaveRecord> | null = null;
-    if (!isStaff) {
-      setIsAddDialogOpen(false);
-      approval = await signToApprove({ signatures, user: currentUser, subject: `${selectedEmployee?.name ?? 'this employee'} · ${leaveType} · ${finalStartDate}${finalEndDate !== finalStartDate ? ` to ${finalEndDate}` : ''}` });
-      if (!approval) { toast.error('Leave not recorded — it needs an approval signature.'); setIsAddDialogOpen(true); return; }
-    }
+    // No signing here: every leave — staff, Admin/HR and Superadmin alike — is saved as Pending. The Maker
+    // signature is the applicant's own linked signature (added automatically on the form); the leave is approved
+    // only after the HR sign and then the Final sign in Pending Leaves.
 
     // The evidence file is linked to the leave id, so the id is fixed up front and the file goes up first.
     const leaveId = Math.random().toString(36).substr(2, 9);
@@ -401,9 +363,7 @@ export const LeaveManagement: React.FC = () => {
         reason,
         casualCriteria: leaveType === 'Casual' && casualCriteria ? casualCriteria : undefined,
         attachments: evidenceMeta ? [evidenceMeta] : undefined,
-        // Staff submits as Pending; Admin/HR records are approved with the signature taken above
-        status: isStaff ? 'Pending' : 'Approved',
-        ...(approval ?? {}),
+        status: 'Pending', // approved only by HR sign → Final sign
       });
       if (!created) {
         if (evidenceMeta) await deleteLeaveFile(evidenceMeta.id); // don't leave an orphaned file behind
@@ -418,7 +378,7 @@ export const LeaveManagement: React.FC = () => {
       setIsSubmittingLeave(false);
     }
 
-    toast.success("Leave recorded successfully");
+    toast.success(isStaff ? 'Leave recorded successfully' : 'Leave recorded — waiting for HR sign, then Final sign (Pending Leaves)');
     setIsAddDialogOpen(false);
     // Reset form
     setLeaveType(null);
@@ -1500,13 +1460,14 @@ export const LeaveManagement: React.FC = () => {
                                                             size="icon"
                                                             variant="ghost"
                                                             className="h-8 w-8 text-green-600 hover:bg-green-50 hover:text-green-700"
-                                                            title="Approve (signature + PIN)"
+                                                            disabled={getHardCopyDeadlineDays(leave.type, !!leave.partialHours) !== null && !leave.hardCopyCollected}
+                                                            title={getHardCopyDeadlineDays(leave.type, !!leave.partialHours) !== null && !leave.hardCopyCollected ? 'Final sign — available after the HR sign' : 'Final sign (Fumihiro Abe or Showkat Akber · signature + PIN)'}
                                                             onClick={async () => {
-                                                                // A leave is only approved once the approver signs with signature + PIN
-                                                                const patch = await signToApprove({ signatures, user: currentUser, subject: `${selectedEmployee?.name ?? 'this employee'} · ${leave.type} · ${leave.startDate}${leave.endDate !== leave.startDate ? ` to ${leave.endDate}` : ''}` });
+                                                                // Final sign: a leave is only approved once a final signer signs with signature + PIN
+                                                                const patch = await signToApprove({ signatures, employees, user: currentUser, subject: `${selectedEmployee?.name ?? 'this employee'} · ${leave.type} · ${leave.startDate}${leave.endDate !== leave.startDate ? ` to ${leave.endDate}` : ''}` });
                                                                 if (!patch) return;
                                                                 updateLeave(leave.id, patch);
-                                                                toast.success(`Leave approved — signed by ${signatures.find(s => s.id === patch.approvedSignatureId)?.name ?? 'approver'}`);
+                                                                toast.success(`Final signed by ${signatures.find(s => s.id === patch.approvedSignatureId)?.name ?? 'approver'} — leave approved`);
                                                             }}
                                                         >
                                                             <Check className="h-4 w-4" />
@@ -1577,13 +1538,13 @@ export const LeaveManagement: React.FC = () => {
                                     })}
                                 </div>
                             </div>
-                            {/* Search (BoardSearch): always in its active look, typing-style hint; cards fade in */}
+                            {/* Search (AnimatedSearch): always in its active look, typing-style hint; cards fade in */}
                             <style>{`
                                 @keyframes boardCardIn { from { opacity: 0; transform: translateY(6px) scale(.98) } to { opacity: 1; transform: none } }
                                 .board-card { animation: boardCardIn .22s ease-out both }
                                 @media (prefers-reduced-motion: reduce) { .board-card { animation: none } }
                             `}</style>
-                            <BoardSearch value={boardQuery} onChange={setBoardQuery} />
+                            <AnimatedSearch value={boardQuery} onChange={setBoardQuery} hints={SEARCH_HINTS} ariaLabel="Search employees by name, EID or designation" width={520} autoFocus />
                         </div>
                         {shown.length === 0 ? (
                             <div style={{ padding: '40px 0', textAlign: 'center', fontSize: 13, color: '#9ca3af' }}>{q ? `No ${boardTab} employee matches “${boardQuery}”.` : `No ${boardTab} employees.`}</div>

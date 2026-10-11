@@ -1,15 +1,15 @@
 import React, { useMemo, useState } from 'react';
 import { format, parseISO } from 'date-fns';
-import { Check, ChevronDown, ChevronLeft, ChevronRight, Eye, FileCheck, Hourglass, Search, SlidersHorizontal, Undo2, X, AlertCircle, CheckCircle2, ClipboardList, CalendarDays } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, Eye, FileCheck, Hourglass, PenLine, Undo2, X, AlertCircle, CheckCircle2, ClipboardList, CalendarDays } from 'lucide-react';
 import { toast } from 'sonner';
-import { Input } from './ui/input';
+import { AnimatedSearch } from './AnimatedSearch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { useAppStore } from '../App';
 import type { LeaveRecord, LeaveType, Employee, MonthTemplate } from '../App';
 import { signAsHr, signToApprove, HR_SIGN_UNDO } from './SignaturePin';
 import { addWorkingDays, getWorkingDayPath, getHardCopyDeadlineDays, hardCopyBaseDate, localDate } from '../lib/leaveDays';
 import { getCasualCriterion } from '../lib/leaveCriteria';
-import { FONT, C, TYPE_STYLE, STATUS_STYLE, Pill, Avatar, OutlineBtn, IconBtn, Label, card, th, td, colLine, fmtQty } from './leaveUi';
+import { FONT, C, TYPE_STYLE, STATUS_STYLE, Pill, Avatar, OutlineBtn, IconBtn, Label, card, th, td, colLine, fmtQty, SignedCell } from './leaveUi';
 
 // Leaves → Pending Leaves tab (Admin/HR).
 // Layout follows the HR reference design: summary cards → one card with segmented tabs + a lean table →
@@ -38,26 +38,27 @@ type Tab = 'pending' | 'awaiting' | 'all';
 
 export const LeaveApprovalsView: React.FC<Props> = ({ leaves, employees, templates, filters, updateLeave, onViewLeaveForm }) => {
   const [tab, setTab] = useState<Tab>('all'); // opens on every open item
-  const [showFilters, setShowFilters] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const todayMid = useMemo(() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; }, []);
   const empOf = (id: string) => employees.find(e => e.id === id);
   const { signatures, currentUser } = useAppStore();
-  // Confirm By HR = sign as HR: pick a signature and enter its PIN
+  const sigById = (id?: string) => (id ? signatures.find(s => s.id === id) : undefined);
+  // HR sign (Confirm By HR): an HR/Admin signature + its PIN — the signed form has reached HR
   const confirmByHr = async (l: LeaveRecord) => {
     const patch = await signAsHr({ signatures, employees, user: currentUser, subject: `${empOf(l.employeeId)?.name ?? 'this leave'} · ${fmtRange(l.startDate, l.endDate)}` });
     if (!patch) return;
     updateLeave(l.id, patch);
-    toast.success(`Form received — signed by ${signatures.find(s => s.id === patch.hrSignatureId)?.name ?? 'HR'}`);
+    toast.success(`HR signed — ${signatures.find(s => s.id === patch.hrSignatureId)?.name ?? 'HR'}`);
   };
-  // Approve = sign to approve: a leave is only approved once the approver has signed with signature + PIN
+  // Final sign = approval: only Fumihiro Abe's or Showkat Akber's signature + its PIN; comes after the HR sign
   const approve = async (l: LeaveRecord) => {
     const name = empOf(l.employeeId)?.name ?? 'this employee';
-    const patch = await signToApprove({ signatures, user: currentUser, subject: `${name} · ${TYPE_STYLE[l.type].label} · ${fmtRange(l.startDate, l.endDate)}` });
+    const patch = await signToApprove({ signatures, employees, user: currentUser, subject: `${name} · ${TYPE_STYLE[l.type].label} · ${fmtRange(l.startDate, l.endDate)}` });
     if (!patch) return;
     updateLeave(l.id, patch);
-    toast.success(`Leave approved for ${name} — signed by ${signatures.find(s => s.id === patch.approvedSignatureId)?.name ?? 'approver'}`);
+    toast.success(`Final signed by ${signatures.find(s => s.id === patch.approvedSignatureId)?.name ?? 'approver'} — leave approved for ${name}`);
   };
+  const reject = (l: LeaveRecord) => { updateLeave(l.id, { status: 'Rejected' }); toast.error(`Leave rejected for ${empOf(l.employeeId)?.name ?? 'this employee'}`); };
 
   // Open items: pending decisions + approved leaves still waiting for their signed hard copy
   const open = useMemo(() => leaves
@@ -142,39 +143,32 @@ export const LeaveApprovalsView: React.FC<Props> = ({ leaves, employees, templat
                 );
               })}
             </div>
-            <button onClick={() => setShowFilters(v => !v)} title="Filters" style={{ position: 'relative', width: 34, height: 34, borderRadius: 8, border: `1px solid ${showFilters ? '#c7d2fe' : 'transparent'}`, background: showFilters ? '#eef2ff' : 'transparent', color: showFilters ? '#4338ca' : C.muted, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
-              <SlidersHorizontal style={{ width: 16, height: 16 }} />
-              {activeFilterCount > 0 && <span style={{ position: 'absolute', top: 3, right: 3, width: 8, height: 8, borderRadius: '50%', background: '#4f46e5' }} />}
-            </button>
           </div>
 
-          {showFilters && (
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', padding: '12px 14px', borderBottom: `1px solid ${C.line}`, background: '#fafafa' }}>
-              <div style={{ position: 'relative', flex: 1, minWidth: 200 }}>
-                <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
-                <Input placeholder="Search by name or EID" value={filters.search} onChange={e => filters.setSearch(e.target.value)} className="pl-9 h-9 text-sm bg-white" style={{ fontFamily: FONT }} />
-              </div>
-              <Select value={filters.employee} onValueChange={filters.setEmployee}>
-                <SelectTrigger className="w-[180px] h-9 text-sm bg-white" style={{ fontFamily: FONT }}><SelectValue placeholder="All employees" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="All">All employees</SelectItem>
-                  {employees.filter(e => e.status === 'Active').map(emp => <SelectItem key={emp.id} value={emp.id}>{emp.name} ({emp.eid})</SelectItem>)}
-                </SelectContent>
-              </Select>
-              <input type="month" value={filters.month} onChange={e => filters.setMonth(e.target.value)} title="Filter by month"
-                className="h-9 px-3 border border-gray-200 rounded-md text-sm bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-700" style={{ minWidth: 150, fontFamily: FONT }} />
-              <Select value={filters.type} onValueChange={filters.setType}>
-                <SelectTrigger className="w-[130px] h-9 text-sm bg-white" style={{ fontFamily: FONT }}><SelectValue placeholder="All types" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="All">All types</SelectItem>
-                  {(Object.keys(TYPE_STYLE) as LeaveType[]).map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
-                </SelectContent>
-              </Select>
-              {activeFilterCount > 0 && (
-                <OutlineBtn onClick={() => { filters.setSearch(''); filters.setEmployee('All'); filters.setMonth(''); filters.setType('All'); }}>Clear</OutlineBtn>
-              )}
-            </div>
-          )}
+          {/* Filters: always shown (pinned); the search is highlighted with a typing-style hint */}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', padding: '12px 14px', borderBottom: `1px solid ${C.line}`, background: '#fafafa' }}>
+            <AnimatedSearch value={filters.search} onChange={filters.setSearch} height={36} ariaLabel="Search open leaves by name or EID"
+              hints={['Search by name or EID…', 'Try a name — e.g. Yousuf', 'Try an EID — e.g. TCF-33']} style={{ flex: '1 1 220px', width: 'auto', minWidth: 200 }} />
+            <Select value={filters.employee} onValueChange={filters.setEmployee}>
+              <SelectTrigger className="w-[180px] h-9 text-sm bg-white" style={{ fontFamily: FONT }}><SelectValue placeholder="All employees" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="All">All employees</SelectItem>
+                {employees.filter(e => e.status === 'Active').map(emp => <SelectItem key={emp.id} value={emp.id}>{emp.name} ({emp.eid})</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <input type="month" value={filters.month} onChange={e => filters.setMonth(e.target.value)} title="Filter by month"
+              className="h-9 px-3 border border-gray-200 rounded-md text-sm bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-700" style={{ minWidth: 150, fontFamily: FONT }} />
+            <Select value={filters.type} onValueChange={filters.setType}>
+              <SelectTrigger className="w-[130px] h-9 text-sm bg-white" style={{ fontFamily: FONT }}><SelectValue placeholder="All types" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="All">All types</SelectItem>
+                {(Object.keys(TYPE_STYLE) as LeaveType[]).map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            {activeFilterCount > 0 && (
+              <OutlineBtn onClick={() => { filters.setSearch(''); filters.setEmployee('All'); filters.setMonth(''); filters.setType('All'); }}>Clear</OutlineBtn>
+            )}
+          </div>
 
           {rows.length === 0 ? (
             <div style={{ padding: '56px 20px', textAlign: 'center' }}>
@@ -186,7 +180,7 @@ export const LeaveApprovalsView: React.FC<Props> = ({ leaves, employees, templat
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed', minWidth: 800 }}>
                 <colgroup>
-                  <col style={{ width: 30 }} /><col style={{ width: 144 }} /><col style={{ width: 136 }} /><col style={{ width: 132 }} /><col /><col style={{ width: 104 }} /><col style={{ width: 168 }} />
+                  <col style={{ width: 30 }} /><col /><col style={{ width: 124 }} /><col style={{ width: 116 }} /><col style={{ width: 100 }} /><col style={{ width: 156 }} /><col style={{ width: 156 }} />
                 </colgroup>
                 <thead>
                   <tr>
@@ -194,16 +188,17 @@ export const LeaveApprovalsView: React.FC<Props> = ({ leaves, employees, templat
                     <th style={th}>Employee</th>
                     <th style={{ ...th, ...colLine }}>Type</th>
                     <th style={{ ...th, ...colLine }}>Duration</th>
-                    <th style={{ ...th, ...colLine }}>Reason</th>
                     <th style={{ ...th, ...colLine }}>Status</th>
-                    <th style={{ ...th, ...colLine }}>Actions</th>
+                    <th style={{ ...th, ...colLine }}>HR Signed</th>
+                    <th style={{ ...th, ...colLine }}>Final Signed</th>
                   </tr>
                 </thead>
                 <tbody>
                   {rows.map(({ l, emp, deadline, overdue, overdueBy }) => {
                     const isPending = l.status === 'Pending';
                     const needsDoc = deadline !== null;
-                    const canApprove = !needsDoc || !!l.hardCopyCollected;
+                    const canApprove = !needsDoc || !!l.hardCopyCollected; // Final sign appears once HR has signed
+                    const hrSigned = !!l.hrSignatureId || !!l.hardCopyCollected;
                     const ts = TYPE_STYLE[l.type];
                     const st = overdue ? STATUS_STYLE.overdue : isPending ? STATUS_STYLE.pending : STATUS_STYLE.approved;
                     const isOpen = expanded === l.id;
@@ -224,40 +219,52 @@ export const LeaveApprovalsView: React.FC<Props> = ({ leaves, employees, templat
                               </div>
                             </div>
                           </td>
-                          <td style={{ ...td, ...colLine }}><Pill bg={ts.bg} fg={ts.fg}><ts.Icon style={{ width: 13, height: 13 }} /> {ts.label}</Pill></td>
+                          <td style={{ ...td, ...colLine }}>
+                            <Pill bg={ts.bg} fg={ts.fg}><ts.Icon style={{ width: 13, height: 13 }} /> {ts.label}</Pill>
+                            {/* reason in one line (full text on hover and in the expanded row) */}
+                            {l.reason && <div title={l.reason} style={{ fontSize: 11.5, color: C.muted, marginTop: 4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.reason}</div>}
+                          </td>
                           <td style={{ ...td, ...colLine }}>
                             <div style={{ color: C.ink, whiteSpace: 'nowrap' }}>{fmtRange(l.startDate, l.endDate)}</div>
                             <div style={{ fontSize: 12, color: C.muted, whiteSpace: 'nowrap' }}>{fmtQty(l)}</div>
-                            {/* signed-form state lives here so the row stays short */}
-                            {needsDoc && (
-                              l.hardCopyCollected ? (
-                                <div style={{ fontSize: 11, color: '#15803d', fontWeight: 600, marginTop: 2, display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}>
-                                  <Check style={{ width: 12, height: 12 }} /> Form received
-                                  {isPending && <button onClick={() => updateLeave(l.id, HR_SIGN_UNDO)} title="Undo (removes the HR signature)" style={{ border: 'none', background: 'transparent', color: C.faint, cursor: 'pointer', display: 'inline-flex', padding: 0 }}><Undo2 style={{ width: 11, height: 11 }} /></button>}
-                                </div>
-                              ) : overdue ? (
+                            {/* signed-form deadline while HR hasn't signed (once signed, the HR Signed column shows it) */}
+                            {needsDoc && !l.hardCopyCollected && (
+                              overdue ? (
                                 <div style={{ fontSize: 11, color: '#b91c1c', fontWeight: 600, marginTop: 2, whiteSpace: 'nowrap' }}>Form overdue · {overdueBy} day{overdueBy !== 1 ? 's' : ''}</div>
                               ) : (
                                 <div style={{ fontSize: 11, color: C.faint, marginTop: 2, whiteSpace: 'nowrap' }}>Form due {format(deadline!, 'MMM d')}</div>
                               )
                             )}
                           </td>
-                          <td style={{ ...td, ...colLine }}>
-                            <div title={l.reason} style={{ overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', lineHeight: 1.45 }}>{l.reason}</div>
-                          </td>
                           <td style={{ ...td, ...colLine }}><Pill bg={st.bg} fg={st.fg} bd={st.bd} upper>{st.label}</Pill></td>
-                          <td style={{ ...td, ...colLine, whiteSpace: 'nowrap', overflow: 'visible' }}>
-                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                              {/* One next step per row: collect the form first, then approve */}
-                              {needsDoc && !l.hardCopyCollected ? (
-                                <OutlineBtn onClick={() => confirmByHr(l)} title="Sign as HR (signature + PIN) to confirm the signed form has reached HR">Confirm By HR</OutlineBtn>
-                              ) : isPending && canApprove ? (
-                                <OutlineBtn color="#15803d" title="Approve (signature + PIN)" onClick={() => approve(l)}>
-                                  <Check style={{ width: 14, height: 14 }} /> Approve
-                                </OutlineBtn>
-                              ) : null}
-                              {isPending && <IconBtn color="#b91c1c" title="Reject" onClick={() => { updateLeave(l.id, { status: 'Rejected' }); toast.error(`Leave rejected for ${emp?.name}`); }}><X style={{ width: 15, height: 15 }} /></IconBtn>}
-                            </div>
+                          {/* HR Signed: the HR signature once signed, otherwise the HR Sign button */}
+                          <td style={{ ...td, ...colLine }}>
+                            {hrSigned ? (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 2, minWidth: 0 }}>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <SignedCell sig={sigById(l.hrSignatureId)} name={l.hrSignatureId ? undefined : l.hrSignedBy} at={l.hrSignedAt} unsigned="Received · unsigned" />
+                                </div>
+                                {isPending && <IconBtn title="Undo HR sign (removes the HR signature)" onClick={() => updateLeave(l.id, HR_SIGN_UNDO)}><Undo2 style={{ width: 13, height: 13 }} /></IconBtn>}
+                              </div>
+                            ) : (
+                              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 2, whiteSpace: 'nowrap' }}>
+                                <OutlineBtn onClick={() => confirmByHr(l)} title="HR sign (signature + PIN): confirms the signed form has reached HR"><PenLine style={{ width: 13, height: 13 }} /> HR Sign</OutlineBtn>
+                                {isPending && !canApprove && <IconBtn color="#b91c1c" title="Reject" onClick={() => reject(l)}><X style={{ width: 15, height: 15 }} /></IconBtn>}
+                              </div>
+                            )}
+                          </td>
+                          {/* Final Signed: the approval signature; the Final Sign button appears after the HR sign */}
+                          <td style={{ ...td, ...colLine }}>
+                            {!isPending ? (
+                              <SignedCell sig={sigById(l.approvedSignatureId)} name={l.approvedSignatureId ? undefined : l.approvedBy} at={l.approvedAt} unsigned="Approved · unsigned" />
+                            ) : canApprove ? (
+                              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 2, whiteSpace: 'nowrap' }}>
+                                <OutlineBtn color="#15803d" title="Final sign (Fumihiro Abe or Showkat Akber · signature + PIN): approves the leave" onClick={() => approve(l)}><PenLine style={{ width: 13, height: 13 }} /> Final Sign</OutlineBtn>
+                                <IconBtn color="#b91c1c" title="Reject" onClick={() => reject(l)}><X style={{ width: 15, height: 15 }} /></IconBtn>
+                              </div>
+                            ) : (
+                              <span style={{ fontSize: 11.5, color: C.faint }}>After HR sign</span>
+                            )}
                           </td>
                         </tr>
                         {isOpen && (

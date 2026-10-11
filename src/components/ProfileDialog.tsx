@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
-import { KeyRound, PenLine } from 'lucide-react';
+import { toast } from 'sonner';
+import { Camera, KeyRound, Loader2, PenLine } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from './ui/dialog';
 import { Button } from './ui/button';
 import { useAppStore } from '../App';
@@ -33,12 +34,56 @@ const serviceLength = (joining?: string) => {
   return y ? `${part(y, 'yr')}${m ? ` ${part(m, 'mo')}` : ''}` : months ? part(m, 'mo') : 'Less than a month';
 };
 
+// Profile photo: the picked file may be up to 2 MB; what's saved is a 320 px square JPEG (~20–40 KB) on the
+// employee record, so loading the employee list stays light.
+const MAX_PHOTO_BYTES = 2 * 1024 * 1024;
+const AVATAR_PX = 320;
+const toAvatarDataUrl = (file: File) => new Promise<string>((resolve, reject) => {
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => {
+    const side = Math.min(img.naturalWidth, img.naturalHeight);
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = AVATAR_PX;
+    const g = canvas.getContext('2d');
+    if (!g) { URL.revokeObjectURL(url); return reject(new Error('no canvas')); }
+    g.fillStyle = '#fff'; // transparent PNGs get a white background
+    g.fillRect(0, 0, AVATAR_PX, AVATAR_PX);
+    g.drawImage(img, (img.naturalWidth - side) / 2, (img.naturalHeight - side) / 2, side, side, 0, 0, AVATAR_PX, AVATAR_PX); // centre crop
+    URL.revokeObjectURL(url);
+    resolve(canvas.toDataURL('image/jpeg', 0.85));
+  };
+  img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('unreadable image')); };
+  img.src = url;
+});
+
 export const ProfileDialog: React.FC<{ open: boolean; onClose: () => void }> = ({ open, onClose }) => {
-  const { currentUser, employees, signatures } = useAppStore();
+  const { currentUser, employees, signatures, updateEmployee } = useAppStore();
   const navigate = useNavigate();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [savingPhoto, setSavingPhoto] = useState(false);
   if (!currentUser) return null;
 
-  const me = employees.find(e => e.id === currentUser.id) || currentUser;
+  const record = employees.find(e => e.id === currentUser.id); // the photo is saved here (Superadmin may have none)
+  const me = record || currentUser;
+
+  const pickPhoto = async (file?: File) => {
+    if (!file || !record) return;
+    if (!/^image\/(jpeg|png|webp)$/.test(file.type)) { toast.error('Choose a JPG, PNG or WebP image.'); return; }
+    if (file.size > MAX_PHOTO_BYTES) { toast.error(`That image is ${(file.size / 1048576).toFixed(1)} MB — the limit is 2 MB.`); return; }
+    setSavingPhoto(true);
+    try {
+      await updateEmployee(record.id, { photoUrl: await toAvatarDataUrl(file) });
+      toast.success('Profile photo updated');
+    } catch { toast.error('Could not read that image — try another one.'); }
+    finally { setSavingPhoto(false); }
+  };
+  const removePhoto = async () => {
+    if (!record) return;
+    setSavingPhoto(true);
+    try { await updateEmployee(record.id, { photoUrl: undefined }); toast.success('Profile photo removed'); }
+    finally { setSavingPhoto(false); }
+  };
   const signature = signatures.find(s => !!s.employeeId && s.employeeId === me.id);
   const rb = roleBadge(me.role);
   const active = me.status === 'Active';
@@ -61,8 +106,27 @@ export const ProfileDialog: React.FC<{ open: boolean; onClose: () => void }> = (
         <div style={{ background: 'linear-gradient(135deg, #eff6ff 0%, #f5f3ff 100%)', padding: '24px 24px 20px', borderBottom: '1px solid #eef2f7' }}>
           <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.6, textTransform: 'uppercase', color: '#6366f1', marginBottom: 10 }}>My profile</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-            <div style={{ width: 60, height: 60, minWidth: 60, borderRadius: 999, background: '#fff', border: '1px solid #e2e8f0', color: '#1d4ed8', boxShadow: '0 1px 3px rgba(0,0,0,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, fontWeight: 700 }}>
-              {me.name.charAt(0).toUpperCase()}
+            {/* Avatar: photo or initial; the camera button uploads a photo (max 2 MB) */}
+            <div style={{ position: 'relative', width: 60, height: 60, minWidth: 60 }}>
+              <div style={{ width: 60, height: 60, borderRadius: 999, overflow: 'hidden', background: '#fff', border: '1px solid #e2e8f0', color: '#1d4ed8', boxShadow: '0 1px 3px rgba(0,0,0,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, fontWeight: 700 }}>
+                {me.photoUrl
+                  ? <img src={me.photoUrl} alt={`${me.name}'s photo`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  : me.name.charAt(0).toUpperCase()}
+              </div>
+              {savingPhoto && (
+                <div style={{ position: 'absolute', inset: 0, borderRadius: 999, background: 'rgba(255,255,255,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#1d4ed8' }}>
+                  <Loader2 className="animate-spin" style={{ width: 20, height: 20 }} />
+                </div>
+              )}
+              {record && (
+                <button type="button" onClick={() => fileRef.current?.click()} disabled={savingPhoto}
+                  title="Upload a photo (JPG, PNG or WebP · max 2 MB)" aria-label="Upload profile photo"
+                  style={{ position: 'absolute', right: -3, bottom: -3, width: 26, height: 26, borderRadius: 999, border: '2px solid #fff', background: '#1d4ed8', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 1px 3px rgba(0,0,0,0.2)' }}>
+                  <Camera style={{ width: 13, height: 13 }} />
+                </button>
+              )}
+              <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" hidden
+                onChange={e => { pickPhoto(e.target.files?.[0]); e.target.value = ''; }} />
             </div>
             <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: 18, fontWeight: 700, color: '#0f172a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{me.name}</div>
@@ -76,6 +140,21 @@ export const ProfileDialog: React.FC<{ open: boolean; onClose: () => void }> = (
                   </span>
                 )}
               </div>
+              {record && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, fontSize: 11.5, color: '#64748b', flexWrap: 'wrap' }}>
+                  <button type="button" onClick={() => fileRef.current?.click()} disabled={savingPhoto}
+                    style={{ border: 'none', background: 'transparent', padding: 0, color: '#1d4ed8', fontWeight: 600, fontSize: 11.5, cursor: 'pointer' }}>
+                    {me.photoUrl ? 'Change photo' : 'Upload photo'}
+                  </button>
+                  <span>JPG, PNG or WebP · max 2 MB</span>
+                  {me.photoUrl && (
+                    <button type="button" onClick={removePhoto} disabled={savingPhoto}
+                      style={{ border: 'none', background: 'transparent', padding: 0, color: '#b91c1c', fontWeight: 600, fontSize: 11.5, cursor: 'pointer' }}>
+                      Remove
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>

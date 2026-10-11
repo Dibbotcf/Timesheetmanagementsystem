@@ -1,6 +1,7 @@
 import React from 'react';
-import { Baby, Briefcase, Plane, Thermometer, Umbrella } from 'lucide-react';
-import type { LeaveRecord, LeaveType } from '../App';
+import { format } from 'date-fns';
+import { Baby, Briefcase, Check, Plane, Thermometer, Umbrella } from 'lucide-react';
+import type { LeaveRecord, LeaveType, Signature } from '../App';
 
 // Shared design kit for the Leaves screens (Pending Leaves, Records). Follows the HR reference design:
 // sans-serif, hairline borders, soft-tint pills, neutral avatars, one quiet action per row.
@@ -86,3 +87,20 @@ export const Bar: React.FC<{ value: number; total: number; color: string }> = ({
     <div style={{ width: `${total ? Math.min(100, (value / total) * 100) : 0}%`, height: '100%', background: color }} />
   </div>
 );
+
+/** Who signed (signature image + name) and when; `pending` text when not signed yet. */
+export const SignedCell: React.FC<{ sig?: Signature; name?: string; at?: string; unsigned?: string }> = ({ sig, name, at, unsigned }) => {
+  const who = sig?.name || name;
+  if (!who) return unsigned ? <span style={{ fontSize: 11.5, color: C.faint }}>{unsigned}</span> : <span style={{ color: C.faint }}>—</span>;
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }} title={`Signed by ${who}${at ? ` on ${format(new Date(at), 'd MMM yyyy, h:mm a')}` : ''}`}>
+      {sig?.imageUrl
+        ? <img src={sig.imageUrl} alt="" style={{ height: 26, width: 46, objectFit: 'contain', flexShrink: 0 }} />
+        : <span style={{ width: 22, height: 22, borderRadius: 999, background: '#16a34a', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><Check style={{ width: 12, height: 12 }} /></span>}
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 12.5, fontWeight: 600, color: C.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{who}</div>
+        {at && <div style={{ fontSize: 11, color: C.muted }}>{format(new Date(at), 'd MMM yyyy')}</div>}
+      </div>
+    </div>
+  );
+};

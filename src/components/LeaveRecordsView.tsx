@@ -4,10 +4,10 @@ import { ArrowLeft, Check, AlertCircle, Download, Eye, File, FileText, Folder, L
 import { toPng } from 'html-to-image';
 import { toast } from 'sonner';
 import { useAppStore } from '../App';
-import type { LeaveRecord, LeaveFolder, SavedLeaveReport, Employee, LeaveAttachment, LeaveAttachmentKind, Signature } from '../App';
+import type { LeaveRecord, LeaveFolder, SavedLeaveReport, Employee, LeaveAttachment, LeaveAttachmentKind } from '../App';
 import { getCasualCriterion } from '../lib/leaveCriteria';
 import { uploadLeaveFile, fetchLeaveFile, deleteLeaveFile, openLeaveFile, formatBytes } from '../utils/leaveFiles';
-import { FONT, C, STATUS_STYLE, statusOf, Pill, TypePill, Avatar, OutlineBtn, PrimaryBtn, IconBtn, card, th, td, colLine, fmtQty, Bar } from './leaveUi';
+import { FONT, C, STATUS_STYLE, statusOf, Pill, TypePill, Avatar, OutlineBtn, PrimaryBtn, IconBtn, card, th, td, colLine, fmtQty, Bar, SignedCell } from './leaveUi';
 import { LeaveRequestFormSheet } from './LeaveRequestForm';
 import { buildMergedPdf, downloadPdfBytes, filePart, type PdfPart } from '../utils/leavePdf';
 
@@ -35,23 +35,6 @@ export function folderMonth(f: LeaveFolder): string | null {
 export const needsSupportingDoc = (l: LeaveRecord) => l.status !== 'Rejected' && l.type === 'Sick';
 const getAttachment = (l: LeaveRecord, kind: LeaveAttachmentKind) => (l.attachments || []).find(a => a.kind === kind);
 export const isEvidenceComplete = (l: LeaveRecord) => !needsSupportingDoc(l) || !!getAttachment(l, 'supporting_doc');
-
-/** Who signed (signature image + name) and when; `pending` text when not signed yet. */
-const SignedCell: React.FC<{ sig?: Signature; name?: string; at?: string; unsigned?: string }> = ({ sig, name, at, unsigned }) => {
-  const who = sig?.name || name;
-  if (!who) return unsigned ? <span style={{ fontSize: 11.5, color: C.faint }}>{unsigned}</span> : <span style={{ color: C.faint }}>—</span>;
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }} title={`Signed by ${who}${at ? ` on ${format(new Date(at), 'd MMM yyyy, h:mm a')}` : ''}`}>
-      {sig?.imageUrl
-        ? <img src={sig.imageUrl} alt="" style={{ height: 26, width: 46, objectFit: 'contain', flexShrink: 0 }} />
-        : <span style={{ width: 22, height: 22, borderRadius: 999, background: '#16a34a', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><Check style={{ width: 12, height: 12 }} /></span>}
-      <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: 12.5, fontWeight: 600, color: C.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{who}</div>
-        {at && <div style={{ fontSize: 11, color: C.muted }}>{format(new Date(at), 'd MMM yyyy')}</div>}
-      </div>
-    </div>
-  );
-};
 
 const fmtRange = (s: string, e: string) => s === e ? format(parseISO(s), 'MMM d') : `${format(parseISO(s), 'MMM d')} — ${format(parseISO(e), 'MMM d')}`;
 

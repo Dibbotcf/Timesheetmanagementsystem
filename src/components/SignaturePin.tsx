@@ -157,11 +157,18 @@ export const SetPinDialog: React.FC<{ signature: Signature; mode: 'own' | 'admin
     );
   };
 
-// ── Sign with a signature + PIN: as HR (Confirm By HR) or to approve a leave ─────
+// ── Sign with a signature + PIN: HR sign (Confirm By HR) or Final sign (approves the leave) ─────
 export type SignPurpose = 'hr' | 'approve';
 const PURPOSE = {
-  hr: { title: 'Sign as HR', label: 'HR signature', action: 'Sign & confirm', lead: (subject: string) => <>Confirm the signed form for <b style={{ color: C.ink }}>{subject}</b> has reached HR. Choose your signature and enter its PIN.</> },
-  approve: { title: 'Sign to approve', label: 'Approval signature', action: 'Sign & approve', lead: (subject: string) => <>Approve the leave for <b style={{ color: C.ink }}>{subject}</b>. It is only approved once signed — choose your signature and enter its PIN.</> },
+  hr: { title: 'HR sign', label: 'HR signature', action: 'Sign & confirm', lead: (subject: string) => <>Confirm the signed form for <b style={{ color: C.ink }}>{subject}</b> has reached HR. Choose your signature and enter its PIN.</> },
+  approve: { title: 'Final sign', label: 'Final signature', action: 'Sign & approve', lead: (subject: string) => <>Final sign for <b style={{ color: C.ink }}>{subject}</b> — the leave is approved once signed. Choose the signature and enter its PIN.</> },
+};
+
+/** Final sign (approval) is done only with these people's signatures: Fumihiro Abe and Showkat Akber (by EID). */
+export const FINAL_SIGNER_EIDS = ['TCF-61', 'TCF-15'];
+const isFinalSigner = (s: Signature, employees?: Employee[]) => {
+  const emp = employees?.find(e => e.id === s.employeeId);
+  return !!emp && FINAL_SIGNER_EIDS.includes(emp.eid);
 };
 
 /** For HR signing: 'hr' when the signature's role is HR, 'admin' when its role says Admin or its employee has an
@@ -176,10 +183,10 @@ const hrGroupOf = (s: Signature, employees?: Employee[]): 'hr' | 'admin' | null 
 
 const SignDialog: React.FC<{ signatures: Signature[]; employees?: Employee[]; user: User; subject: string; purpose: SignPurpose; onDone: (s: Signature | null) => void }> = ({ signatures, employees, user, subject, purpose, onDone }) => {
   const P = PURPOSE[purpose];
-  // Signing as HR lists HR signatures first, then Admin ones; approving lists every signature
+  // HR sign lists HR signatures first, then Admin ones; Final sign lists only the final signers' signatures
   const groups = purpose === 'hr'
     ? [{ label: 'HR', list: signatures.filter(s => hrGroupOf(s, employees) === 'hr') }, { label: 'Admin', list: signatures.filter(s => hrGroupOf(s, employees) === 'admin') }]
-    : [{ label: '', list: signatures }];
+    : [{ label: '', list: signatures.filter(s => isFinalSigner(s, employees)) }];
   const allowed = groups.flatMap(g => g.list);
   const own = allowed.find(s => s.employeeId && s.employeeId === user?.id);
   const [sigId, setSigId] = useState(own?.id || '');
@@ -190,13 +197,13 @@ const SignDialog: React.FC<{ signatures: Signature[]; employees?: Employee[]; us
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!sig) return setError('Choose the HR signature.');
+    if (!sig) return setError(`Choose the ${P.label.toLowerCase()}.`);
     if (!PIN_RE.test(pin)) return setError('Enter the 4-digit PIN.');
     setBusy(true);
     try {
       const pins = await fetchSignaturePins();
       const rec = pins[sig.id];
-      if (!rec && !(await isMaster(pin, user))) { setError(`${sig.name}'s signature has no PIN yet — set one under Employees → Signatures.`); setPin(''); return; }
+      if (!rec && !(await isMaster(pin, user))) { setError(`${sig.name}'s signature has no PIN yet — set one in Settings → My Signature PIN.`); setPin(''); return; }
       if (!(await checkPin(sig.id, pin, rec, user))) { setError('Incorrect PIN.'); setPin(''); return; }
       onDone(sig);
     } catch { setError('Could not check the PIN — is the server running?'); }
@@ -216,6 +223,11 @@ const SignDialog: React.FC<{ signatures: Signature[]; employees?: Employee[]; us
             return g.label ? (g.list.length > 0 && <optgroup key={g.label} label={g.label}>{opts}</optgroup>) : opts;
           })}
         </select>
+        {allowed.length === 0 && (
+          <div style={{ marginTop: 6, fontSize: 12, color: C.red }}>
+            {purpose === 'approve' ? "Final sign needs Fumihiro Abe's or Showkat Akber's signature — add it under Employees → Signatures." : 'No HR or Admin signature found — add one under Employees → Signatures.'}
+          </div>
+        )}
         {sig?.imageUrl && (
           <div style={{ marginTop: 8, height: 64, border: `1px solid ${C.line}`, borderRadius: 8, background: '#f9fafb', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <img src={sig.imageUrl} alt={`${sig.name} signature`} style={{ maxHeight: 54, maxWidth: '90%', objectFit: 'contain' }} />
@@ -234,8 +246,8 @@ export async function signAsHr(opts: { signatures: Signature[]; employees?: Empl
   const sig = await requestSignature({ ...opts, purpose: 'hr' });
   return sig ? { hardCopyCollected: true, hrSignatureId: sig.id, hrSignedAt: new Date().toISOString(), hrSignedBy: opts.user?.name } : null;
 }
-/** Approving a leave: ask for the approver's signature + PIN; returns the leave fields to save, or null when cancelled. */
-export async function signToApprove(opts: { signatures: Signature[]; user: User; subject: string }): Promise<Partial<LeaveRecord> | null> {
+/** Final sign (approves the leave): ask for a final signer's signature + PIN; returns the leave fields to save, or null when cancelled. */
+export async function signToApprove(opts: { signatures: Signature[]; employees: Employee[]; user: User; subject: string }): Promise<Partial<LeaveRecord> | null> {
   const sig = await requestSignature({ ...opts, purpose: 'approve' });
   return sig ? { status: 'Approved', approvedSignatureId: sig.id, approvedAt: new Date().toISOString(), approvedBy: opts.user?.name } : null;
 }
