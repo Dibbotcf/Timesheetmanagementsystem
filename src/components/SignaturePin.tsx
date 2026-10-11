@@ -7,7 +7,7 @@ import { API_BASE_URL as API_BASE, getAuthHeaders } from '../utils/api';
 import { confirmDialog } from './ConfirmDialog';
 
 // 4-digit PINs on signatures — a signature can only be used to sign (as HR, or to approve a leave) with its PIN.
-// - Master PIN (the Superadmin's): opens every signature, and only while logged in as Superadmin.
+// - Master PIN (the Superadmin's): opens every signature, whoever is logged in.
 //   Only its SHA-256 is in the code.
 // - Own PIN: salted SHA-256 in `signature_pins:{signatureId}`. Set or changed by the employee the signature
 //   belongs to (linked by EID); the Superadmin sees every signature's PIN status and can set, reset or remove it.
@@ -28,7 +28,7 @@ async function sha256Hex(text: string): Promise<string> {
 }
 const pinHash = (pin: string, signatureId: string, salt: string) => sha256Hex(`${salt}|${signatureId}|${pin}`);
 const newSalt = () => Array.from(crypto.getRandomValues(new Uint8Array(16))).map(b => b.toString(16).padStart(2, '0')).join('');
-const isMaster = async (pin: string, user: User) => user?.role === 'Superadmin' && (await sha256Hex(pin)) === MASTER_PIN_SHA256;
+const isMaster = async (pin: string, _user?: User) => (await sha256Hex(pin)) === MASTER_PIN_SHA256;
 
 export async function fetchSignaturePins(): Promise<Record<string, SignaturePin>> {
   const res = await fetch(`${API_BASE}/items/signature_pins`, { headers: getAuthHeaders() });
@@ -132,7 +132,7 @@ export const SetPinDialog: React.FC<{ signature: Signature; mode: 'own' | 'admin
     const remove = async () => {
       if (!(await confirmDialog({
         title: `Remove ${signature.name}'s PIN?`, icon: 'lock', tone: 'danger', confirmLabel: 'Remove PIN',
-        message: <>The signature can't be used to sign as HR until a new PIN is set (the master PIN still works for the Superadmin).</>,
+        message: <>The signature can't be used to sign as HR until a new PIN is set (the master PIN still works).</>,
       }))) return;
       setBusy(true);
       try { await removePin(signature.id); toast.success(`PIN removed for ${signature.name}`); onSaved(); onClose(); }
