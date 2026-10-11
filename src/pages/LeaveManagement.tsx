@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -7,7 +7,7 @@ import { Textarea } from '../components/ui/textarea';
 import { Badge } from '../components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from '../components/ui/dialog';
 import { Popover, PopoverContent, PopoverTrigger } from '../components/ui/popover';
-import { Calendar as CalendarIcon, Plus, Trash2, User, AlertCircle, Settings, RefreshCw, LayoutList, UserSquare2, History, ArrowRightLeft, Folder, Save, File, Download, Eye, X, Check, ChevronsUpDown, Paperclip, FileText, Loader2 } from 'lucide-react';
+import { Calendar as CalendarIcon, Plus, Trash2, User, AlertCircle, Settings, RefreshCw, LayoutList, UserSquare2, History, ArrowRightLeft, Folder, Save, File, Download, Eye, X, Check, ChevronsUpDown, Paperclip, FileText, Loader2, ArrowLeft } from 'lucide-react';
 import { Checkbox } from '../components/ui/checkbox';
 import { useAppStore, LeaveType, LeaveRequest, LeaveRecord, Employee, SavedLeaveReport } from '../App';
 import { signAsHr, signToApprove, HR_SIGN_UNDO } from '../components/SignaturePin';
@@ -35,6 +35,41 @@ const SELECTED_TYPE_COLOR = '#2563eb'; // single blue for the chosen tile, badge
 // Words that usually mean the leave should be Sick, not Casual — used only for a soft warning
 const ILLNESS_WORDS = /\b(sick|ill|illness|fever|flu|cold|doctor|hospital|clinic|medical|medicine|headache|pain|unwell|surgery|injur)/i;
 
+// Employee-board search: always shown in its active look; while empty, the hint types itself out and cycles.
+const SEARCH_HINTS = ['Search by name, EID or designation…', 'Try a name — e.g. Rabeya', 'Try an EID — e.g. TCF-52'];
+const BoardSearch: React.FC<{ value: string; onChange: (v: string) => void }> = ({ value, onChange }) => {
+    const [hint, setHint] = useState(SEARCH_HINTS[0]);
+    useEffect(() => {
+        if (value) return; // no animation while something is typed
+        if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) { setHint(SEARCH_HINTS[0]); return; }
+        let phrase = 0, len = 0, erasing = false, timer = 0;
+        const tick = () => {
+            const full = SEARCH_HINTS[phrase];
+            len += erasing ? -1 : 1;
+            setHint(full.slice(0, len) + '▏');
+            if (!erasing && len === full.length) { erasing = true; timer = window.setTimeout(tick, 1800); return; } // hold the full line
+            if (erasing && len === 0) { erasing = false; phrase = (phrase + 1) % SEARCH_HINTS.length; timer = window.setTimeout(tick, 350); return; }
+            timer = window.setTimeout(tick, erasing ? 25 : 55);
+        };
+        timer = window.setTimeout(tick, 300);
+        return () => window.clearTimeout(timer);
+    }, [value]);
+    return (
+        <div style={{ position: 'relative', width: 520, maxWidth: '100%' }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2563eb" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ position: 'absolute', left: 13, top: 12 }}>
+                <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" />
+            </svg>
+            <input value={value} onChange={e => onChange(e.target.value)} placeholder={hint} aria-label="Search employees by name, EID or designation" autoFocus
+                style={{ width: '100%', height: 40, borderRadius: 10, border: '1px solid #3b82f6', padding: '0 36px', fontSize: 13.5, outline: 'none', background: '#fff', boxShadow: '0 0 0 4px rgba(59,130,246,0.15)' }} />
+            <button type="button" aria-label="Clear search" onMouseDown={e => e.preventDefault()} onClick={() => onChange('')}
+                style={{ position: 'absolute', right: 8, top: 8, width: 24, height: 24, borderRadius: 999, border: 'none', background: '#e5e7eb', color: '#4b5563', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+                    opacity: value ? 1 : 0, transform: value ? 'scale(1)' : 'scale(.6)', pointerEvents: value ? 'auto' : 'none', transition: 'opacity .15s, transform .15s' }}>
+                <X className="h-3.5 w-3.5" />
+            </button>
+        </div>
+    );
+};
+
 export const LeaveManagement: React.FC = () => {
   const { employees, leaves, addLeave, updateLeave, deleteLeave, updateEmployee, deleteEmployee, currentUser, leaveFolders, addLeaveFolder, deleteLeaveFolder, savedLeaveReports, addSavedLeaveReport, deleteSavedLeaveReport, getItem, templates, signatures } = useAppStore();
   
@@ -50,6 +85,8 @@ export const LeaveManagement: React.FC = () => {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isSetLimitOpen, setIsSetLimitOpen] = useState(false);
   const [openEmployeeSelect, setOpenEmployeeSelect] = useState(false);
+  const [boardQuery, setBoardQuery] = useState(''); // search on the employee board (Individual tab, nobody selected)
+  const [boardTab, setBoardTab] = useState<'active' | 'resigned'>('active');
 
   // Transfer / Archive State
   const [selectedForTransfer, setSelectedForTransfer] = useState<Set<string>>(new Set());
@@ -681,14 +718,23 @@ export const LeaveManagement: React.FC = () => {
 
       {viewMode === 'individual' ? (
         <>
-            {/* Employee Selection */}
+            {/* Employee Selection — shown once someone is chosen (the board below handles "nobody yet") */}
+            {(isStaff || selectedEmployeeId) && (
             <Card className="bg-blue-50 border-blue-100">
                 <CardContent className="pt-6">
                     <div className="flex flex-col md:flex-row gap-4 items-center">
                         <div className="w-full md:w-1/3">
-                            <label className="text-sm font-medium mb-1 block text-blue-900">
-                                {isStaff ? 'Viewing Your Profile' : 'Select Employee to Manage'}
-                            </label>
+                            <div className="flex items-center justify-between mb-1">
+                                <label className="text-sm font-medium block text-blue-900">
+                                    {isStaff ? 'Viewing Your Profile' : 'Select Employee to Manage'}
+                                </label>
+                                {!isStaff && (
+                                    <button type="button" onClick={() => { setSelectedEmployeeId(''); setBoardQuery(''); }}
+                                        style={{ display: 'inline-flex', alignItems: 'center', gap: 4, border: 'none', background: 'transparent', color: '#1d4ed8', fontSize: 12, fontWeight: 600, cursor: 'pointer', padding: 0 }}>
+                                        <ArrowLeft className="h-3.5 w-3.5" /> Change employee
+                                    </button>
+                                )}
+                            </div>
                             {isStaff ? (
                                 <div className="p-2 bg-gray-100 rounded border border-gray-200 font-medium text-gray-700">
                                     {currentUser?.name} ({currentUser?.eid})
@@ -789,6 +835,7 @@ export const LeaveManagement: React.FC = () => {
                     </div>
                 </CardContent>
             </Card>
+            )}
 
             {selectedEmployeeId && currentStats ? (
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -1418,7 +1465,7 @@ export const LeaveManagement: React.FC = () => {
                                                                         <button
                                                                             onClick={async () => {
                                                                                 // Confirm By HR = sign as HR: pick a signature and enter its PIN
-                                                                                const patch = await signAsHr({ signatures, user: currentUser, subject: `${selectedEmployee?.name ?? 'this leave'} · ${leave.startDate}` });
+                                                                                const patch = await signAsHr({ signatures, employees, user: currentUser, subject: `${selectedEmployee?.name ?? 'this leave'} · ${leave.startDate}` });
                                                                                 if (!patch) return;
                                                                                 updateLeave(leave.id, patch);
                                                                                 toast.success(`Form received — signed by ${signatures.find(s => s.id === patch.hrSignatureId)?.name ?? 'HR'}`);
@@ -1499,12 +1546,92 @@ export const LeaveManagement: React.FC = () => {
                         )}
                     </div>
                 </div>
-            ) : (
-                <div className="flex flex-col items-center justify-center h-64 text-gray-400 bg-white rounded-lg border border-dashed">
-                    <User className="h-16 w-16 mb-4 opacity-20" />
-                    <p>Please select an employee to view and manage leaves</p>
-                </div>
-            )}
+            ) : !isStaff ? (() => {
+                // Employee board: every employee at a glance (EID order, resigned last) — click a card to open them
+                const byEidNum = (a: Employee, b: Employee) => a.eid.localeCompare(b.eid, undefined, { numeric: true, sensitivity: 'base' });
+                const q = boardQuery.trim().toLowerCase();
+                const activeCount = employees.filter(e => e.status === 'Active').length;
+                const resignedCount = employees.length - activeCount;
+                const shown = [...employees]
+                    .filter(e => (boardTab === 'active') === (e.status === 'Active'))
+                    .filter(e => !q || [e.name, e.eid, e.jobTitle, e.designation].some(v => String(v || '').toLowerCase().includes(q)))
+                    .sort(byEidNum);
+                const tabs = [{ key: 'active' as const, label: 'Active', n: activeCount }, { key: 'resigned' as const, label: 'Resigned', n: resignedCount }];
+                const initials = (n: string) => n.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase();
+                return (
+                    <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: 18 }}>
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3" style={{ marginBottom: 14 }}>
+                            <div>
+                                <div style={{ fontSize: 16, fontWeight: 700, color: '#111827', marginBottom: 8 }}>Choose an employee</div>
+                                {/* Active / Resigned tabs */}
+                                <div style={{ display: 'inline-flex', background: '#f3f4f6', borderRadius: 10, padding: 3, gap: 2 }}>
+                                    {tabs.map(t => {
+                                        const on = boardTab === t.key;
+                                        return (
+                                            <button key={t.key} type="button" onClick={() => setBoardTab(t.key)}
+                                                style={{ display: 'inline-flex', alignItems: 'center', gap: 8, height: 30, padding: '0 14px', borderRadius: 8, border: 'none', background: on ? '#fff' : 'transparent', color: on ? '#111827' : '#6b7280', fontSize: 13, fontWeight: on ? 600 : 500, cursor: 'pointer', boxShadow: on ? '0 1px 2px rgba(0,0,0,0.06)' : 'none' }}>
+                                                {t.label}
+                                                <span style={{ background: on ? (t.key === 'active' ? '#16a34a' : '#6b7280') : '#e5e7eb', color: on ? '#fff' : '#374151', fontSize: 11, fontWeight: 600, padding: '1px 8px', borderRadius: 999 }}>{t.n}</span>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                            {/* Search (BoardSearch): always in its active look, typing-style hint; cards fade in */}
+                            <style>{`
+                                @keyframes boardCardIn { from { opacity: 0; transform: translateY(6px) scale(.98) } to { opacity: 1; transform: none } }
+                                .board-card { animation: boardCardIn .22s ease-out both }
+                                @media (prefers-reduced-motion: reduce) { .board-card { animation: none } }
+                            `}</style>
+                            <BoardSearch value={boardQuery} onChange={setBoardQuery} />
+                        </div>
+                        {shown.length === 0 ? (
+                            <div style={{ padding: '40px 0', textAlign: 'center', fontSize: 13, color: '#9ca3af' }}>{q ? `No ${boardTab} employee matches “${boardQuery}”.` : `No ${boardTab} employees.`}</div>
+                        ) : (
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: 12 }}>
+                                {shown.map(emp => {
+                                    const st = calculateEmployeeLeaveStats(emp);
+                                    const pending = leaves.filter(l => l.employeeId === emp.id && l.status === 'Pending').length;
+                                    const resigned = emp.status !== 'Active';
+                                    const chips: { label: string; type: LeaveType }[] = [{ label: 'Casual', type: 'Casual' }, { label: 'Sick', type: 'Sick' }, { label: 'Annual', type: 'Annual' }];
+                                    return (
+                                        <button key={emp.id} type="button" className="board-card" onClick={() => setSelectedEmployeeId(emp.id)}
+                                            style={{ textAlign: 'left', background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: '12px 14px', cursor: 'pointer', transition: 'border-color .15s, box-shadow .15s' }}
+                                            onMouseEnter={e => { e.currentTarget.style.borderColor = '#93c5fd'; e.currentTarget.style.boxShadow = '0 4px 12px rgba(29,78,216,0.08)'; }}
+                                            onMouseLeave={e => { e.currentTarget.style.borderColor = '#e5e7eb'; e.currentTarget.style.boxShadow = 'none'; }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                                <span style={{ width: 36, height: 36, borderRadius: 999, background: '#e0e7ff', color: '#3730a3', fontSize: 12.5, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{initials(emp.name)}</span>
+                                                <span style={{ flex: 1, minWidth: 0 }}>
+                                                    <span style={{ display: 'block', fontSize: 13.5, fontWeight: 600, color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{emp.name}</span>
+                                                    <span style={{ display: 'block', fontSize: 11.5, color: '#6b7280' }}>{emp.eid}{emp.jobTitle ? ` · ${emp.jobTitle}` : emp.role ? ` · ${emp.role}` : ''}</span>
+                                                </span>
+                                                {resigned ? (
+                                                    <span className="px-3 py-1 rounded-full" style={{ background: '#6b7280', color: '#fff', fontSize: 10.5, fontWeight: 600, whiteSpace: 'nowrap' }}>Resigned</span>
+                                                ) : pending > 0 ? (
+                                                    <span className="px-3 py-1 rounded-full" style={{ background: '#f59e0b', color: '#fff', fontSize: 10.5, fontWeight: 600, whiteSpace: 'nowrap' }}>{pending} pending</span>
+                                                ) : null}
+                                            </div>
+                                            <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
+                                                {chips.map(c => {
+                                                    const notEligible = c.type === 'Annual' && !st.isEligibleForAnnual && emp.customLeaveLimits?.Annual === undefined;
+                                                    const left = st.getBalance(c.type);
+                                                    const low = !notEligible && left < 2;
+                                                    return (
+                                                        <span key={c.type} style={{ flex: 1, background: '#f8fafc', border: '1px solid #f1f5f9', borderRadius: 8, padding: '5px 6px', textAlign: 'center' }}>
+                                                            <span style={{ display: 'block', fontSize: 10, color: '#6b7280', textTransform: 'uppercase', letterSpacing: 0.3 }}>{c.label}</span>
+                                                            <span style={{ display: 'block', fontSize: 14, fontWeight: 700, color: notEligible ? '#9ca3af' : low ? '#dc2626' : '#1d4ed8', fontVariantNumeric: 'tabular-nums' }}>{notEligible ? '—' : st.fmt(left)}</span>
+                                                        </span>
+                                                    );
+                                                })}
+                                            </div>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </div>
+                );
+            })() : null}
         </>
       ) : viewMode === 'list' ? (
         <Card>

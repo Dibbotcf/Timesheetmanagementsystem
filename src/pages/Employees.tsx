@@ -41,6 +41,12 @@ import { AspectRatio } from "../components/ui/aspect-ratio";
 
 const MONTH_ABBR = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
 
+// Actions column stays on screen at the right edge of the table
+const STICKY_RIGHT: React.CSSProperties = { position: 'sticky', right: 0, background: '#fff' };
+
+// Position: DIC, otherwise Member
+const positionOf = (e: Partial<Employee>) => (e.designation === 'DIC' ? 'DIC' : 'Member');
+
 // Soft role pill colors (inline styles — Tailwind v4 purges dynamic color classes)
 const roleBadge = (role: string) =>
   role === 'Superadmin' ? { bg: '#f3e8ff', fg: '#7c3aed' }
@@ -60,6 +66,7 @@ export const Employees: React.FC = () => {
     role: 'Staff'
   });
 
+  const [newDesignation, setNewDesignation] = useState(false); // "+ Add new designation…" picked: type it in a box
   const [viewingEmployee, setViewingEmployee] = useState<Employee | null>(null);
   const [isViewOpen, setIsViewOpen] = useState(false);
 
@@ -143,7 +150,8 @@ export const Employees: React.FC = () => {
   ])), [employees]);
 
   const resetForm = () => {
-    setFormData({ status: 'Active', role: 'Staff' });
+    setFormData({ status: 'Active', role: 'Staff', designation: 'Member' });
+    setNewDesignation(false);
     setIsEditing(false);
     setCurrentId(null);
   };
@@ -155,6 +163,7 @@ export const Employees: React.FC = () => {
 
   const handleEdit = (emp: Employee) => {
     setFormData(emp);
+    setNewDesignation(false);
     setCurrentId(emp.id);
     setIsEditing(true);
     setIsDialogOpen(true);
@@ -167,11 +176,12 @@ export const Employees: React.FC = () => {
       return;
     }
 
+    const data = { ...formData, designation: positionOf(formData) };
     if (isEditing && currentId) {
-      updateEmployee(currentId, formData);
+      updateEmployee(currentId, data);
       toast.success('Employee updated successfully');
     } else {
-      addEmployee(formData as Omit<Employee, 'id'>);
+      addEmployee(data as Omit<Employee, 'id'>);
       toast.success('Employee added successfully');
     }
     setIsDialogOpen(false);
@@ -204,6 +214,16 @@ export const Employees: React.FC = () => {
     a.eid.localeCompare(b.eid, undefined, { numeric: true, sensitivity: 'base' })), [employees]);
   const signatureOf = useMemo(() => new Map(signatures.filter(s => s.employeeId).map(s => [s.employeeId!, s.id])), [signatures]);
   const linkedEmployee = (sig: Signature) => employees.find(e => e.id === sig.employeeId);
+  // Cards in EID order (TCF-15, TCF-23, …); signatures not linked to an employee go last, by name
+  const signaturesByEid = useMemo(() => {
+    const eidOf = new Map(employees.map(e => [e.id, e.eid]));
+    return [...signatures].sort((a, b) => {
+      const ea = a.employeeId ? eidOf.get(a.employeeId) : undefined, eb = b.employeeId ? eidOf.get(b.employeeId) : undefined;
+      if (ea && eb) return ea.localeCompare(eb, undefined, { numeric: true, sensitivity: 'base' });
+      if (ea || eb) return ea ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+  }, [signatures, employees]);
 
   // Signature PINs (needed to sign as HR). The Superadmin sees and manages every signature's PIN;
   // anyone else only their own signature's (the one linked to their employee record).
@@ -310,19 +330,20 @@ export const Employees: React.FC = () => {
               </div>
             </CardHeader>
             <CardContent className="p-0">
+              <style>{`.emp-row:hover > .emp-actions { background: #f8fafc }`}</style>
               <Table>
                 <TableHeader>
                   <TableRow className="hover:bg-transparent border-slate-100">
-                    <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold pl-6 pr-2 py-3">#</TableHead>
-                    <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold px-3 py-3">EID</TableHead>
-                    <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold px-3 py-3">Name</TableHead>
-                    <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold px-3 py-3">Role</TableHead>
-                    <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold px-3 py-3">Position</TableHead>
-                    <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold px-3 py-3">Designation</TableHead>
-                    <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold px-3 py-3">Date of Birth</TableHead>
-                    <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold px-3 py-3">Joining Date</TableHead>
-                    <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold px-3 py-3">Status</TableHead>
-                    <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold text-right pl-4 pr-6 py-3">Actions</TableHead>
+                    <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold pl-4 pr-2 py-3">#</TableHead>
+                    <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold px-2 py-3">EID</TableHead>
+                    <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold px-2 py-3">Name</TableHead>
+                    <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold px-2 py-3">Role</TableHead>
+                    <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold px-2 py-3">Position</TableHead>
+                    <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold px-2 py-3">Designation</TableHead>
+                    <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold px-2 py-3">Date of Birth</TableHead>
+                    <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold px-2 py-3">Joining Date</TableHead>
+                    <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold px-2 py-3">Status</TableHead>
+                    <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold text-right pl-2 pr-4 py-3 emp-actions" style={STICKY_RIGHT}>Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -336,12 +357,12 @@ export const Employees: React.FC = () => {
                     filteredEmployees.map((emp, index) => {
                       const rb = roleBadge(emp.role);
                       return (
-                      <TableRow key={emp.id} className="border-slate-100 hover:bg-slate-50 transition-colors">
-                        <TableCell className="pl-6 pr-2 py-3.5 text-sm font-medium text-slate-500 tabular-nums">{index + 1}</TableCell>
-                        <TableCell className="px-3 py-3.5">
+                      <TableRow key={emp.id} className="emp-row border-slate-100 hover:bg-slate-50 transition-colors">
+                        <TableCell className="pl-4 pr-2 py-3.5 text-sm font-medium text-slate-500 tabular-nums">{index + 1}</TableCell>
+                        <TableCell className="px-2 py-3.5">
                           <span className="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold font-mono" style={{ background: '#eff6ff', color: '#1d4ed8' }}>{emp.eid}</span>
                         </TableCell>
-                        <TableCell className="px-3 py-3.5">
+                        <TableCell className="px-2 py-3.5">
                           <div className="flex items-center gap-3">
                             <div className="rounded-full flex items-center justify-center text-sm font-semibold" style={{ width: '36px', height: '36px', minWidth: '36px', flexShrink: 0, background: '#f8fafc', border: '1px solid #e2e8f0', color: '#475569' }}>
                               {emp.name.charAt(0).toUpperCase()}
@@ -349,28 +370,26 @@ export const Employees: React.FC = () => {
                             <span className="font-medium text-slate-800 whitespace-nowrap">{emp.name}</span>
                           </div>
                         </TableCell>
-                        <TableCell className="px-3 py-3.5">
+                        <TableCell className="px-2 py-3.5">
                           <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap" style={{ background: rb.bg, color: rb.fg }}>
                             {emp.role}
                           </span>
                         </TableCell>
-                        <TableCell className="px-3 py-3.5">
-                          {emp.designation
-                            ? <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-600">{emp.designation}</span>
-                            : <span className="text-slate-300">—</span>}
+                        <TableCell className="px-2 py-3.5">
+                          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-600">{positionOf(emp)}</span>
                         </TableCell>
-                        <TableCell className="px-3 py-3.5 text-sm text-slate-700 whitespace-nowrap">
+                        <TableCell className="px-2 py-3.5 text-sm text-slate-700 whitespace-nowrap">
                           {emp.jobTitle || <span className="text-slate-300">—</span>}
                         </TableCell>
-                        <TableCell className="text-sm text-slate-600 tabular-nums whitespace-nowrap px-3 py-3.5">{new Date(emp.dob).toLocaleDateString()}</TableCell>
-                        <TableCell className="text-sm text-slate-600 tabular-nums whitespace-nowrap px-3 py-3.5">{emp.joiningDate ? new Date(emp.joiningDate).toLocaleDateString() : '—'}</TableCell>
-                        <TableCell className="px-3 py-3.5">
+                        <TableCell className="text-sm text-slate-600 tabular-nums whitespace-nowrap px-2 py-3.5">{new Date(emp.dob).toLocaleDateString()}</TableCell>
+                        <TableCell className="text-sm text-slate-600 tabular-nums whitespace-nowrap px-2 py-3.5">{emp.joiningDate ? new Date(emp.joiningDate).toLocaleDateString() : '—'}</TableCell>
+                        <TableCell className="px-2 py-3.5">
                           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap" style={emp.status === 'Active' ? { background: '#f0fdf4', color: '#16a34a' } : { background: '#fef2f2', color: '#dc2626' }}>
                             <span className="h-1.5 w-1.5 rounded-full" style={{ background: emp.status === 'Active' ? '#16a34a' : '#dc2626' }} />
                             {emp.status}
                           </span>
                         </TableCell>
-                        <TableCell className="text-right pl-4 pr-6 py-3.5">
+                        <TableCell className="text-right pl-2 pr-4 py-3.5 emp-actions" style={STICKY_RIGHT}>
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                               <Button variant="ghost" className="h-8 w-8 p-0">
@@ -485,23 +504,42 @@ export const Employees: React.FC = () => {
 
         {/* Signatures Tab */}
         <TabsContent value="signatures" className="space-y-4 mt-4">
-           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+           <div className="flex flex-col sm:flex-row justify-between gap-3" style={{ alignItems: 'flex-start' }}>
             <div>
               <p className="text-sm text-gray-500">Link a signature to its employee (EID) and it is added automatically as the <b>Maker Signature</b> on their leave forms.</p>
               <p className="text-sm text-gray-500">Signing as HR (<b>Confirm By HR</b>) needs the signature's 4-digit PIN.</p>
+              {/* Superadmin: how many signatures have a PIN — progress card under the intro, on the left */}
+              {isSuperadmin && pins && (() => {
+                const total = signatures.length, missing = total - pinCount, done = total > 0 && missing === 0;
+                const tone = done ? { fg: '#15803d', soft: '#dcfce7' } : { fg: '#b45309', soft: '#fef3c7' };
+                return (
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 12, marginTop: 10, padding: '8px 14px 8px 8px', background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, boxShadow: '0 1px 2px rgba(15,23,42,0.04)' }}>
+                    <span style={{ width: 34, height: 34, borderRadius: 10, background: tone.soft, color: tone.fg, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                      <KeyRound style={{ width: 17, height: 17 }} />
+                    </span>
+                    <div style={{ minWidth: 150 }}>
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+                        <span style={{ fontSize: 12.5, fontWeight: 700, color: '#111827' }}>Signature PINs</span>
+                        <span style={{ fontSize: 12, color: '#6b7280', fontVariantNumeric: 'tabular-nums' }}>{pinCount} of {total} set</span>
+                      </div>
+                      <div style={{ marginTop: 6, height: 6, borderRadius: 999, background: '#f1f5f9', overflow: 'hidden' }}>
+                        <div style={{ width: `${total ? (pinCount / total) * 100 : 0}%`, height: '100%', borderRadius: 999, background: tone.fg, transition: 'width .4s ease' }} />
+                      </div>
+                    </div>
+                    <span className="px-3 py-1 rounded-full whitespace-nowrap" style={{ background: tone.fg, color: '#fff', fontSize: 11.5, fontWeight: 600 }}>
+                      {done ? 'All set' : `${missing} not set`}
+                    </span>
+                  </div>
+                );
+              })()}
             </div>
-            {isSuperadmin && pins && (
-              <span className="px-3 py-1 rounded-full whitespace-nowrap" style={{ background: pinCount === signatures.length ? '#15803d' : '#b45309', color: '#fff', fontSize: 12, fontWeight: 600 }}>
-                PIN set: {pinCount} of {signatures.length}
-              </span>
-            )}
             <Button onClick={handleOpenAddSig} className="w-full sm:w-auto bg-blue-900 hover:bg-blue-800">
               <Plus className="mr-2 h-4 w-4" /> Add Signature
             </Button>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {signatures.map((sig) => (
+            {signaturesByEid.map((sig) => (
               <Card key={sig.id}>
                 <CardContent className="p-4 flex flex-col gap-4">
                   <div className="aspect-[3/1] bg-gray-50 border rounded-md overflow-hidden flex items-center justify-center relative">
@@ -654,21 +692,35 @@ export const Employees: React.FC = () => {
             </div>
             <div className="space-y-2">
               <Label htmlFor="jobTitle">Designation</Label>
-              <Input
-                id="jobTitle"
-                list="designation-options"
-                value={formData.jobTitle || ''}
-                onChange={e => setFormData({...formData, jobTitle: e.target.value})}
-                placeholder="e.g. Senior Associate"
-              />
-              <datalist id="designation-options">
-                {designationOptions.map(d => <option key={d} value={d} />)}
-              </datalist>
+              <Select
+                value={newDesignation ? '__new' : (formData.jobTitle || '')}
+                onValueChange={(val) => {
+                  setNewDesignation(val === '__new');
+                  setFormData({...formData, jobTitle: val === '__new' || val === '__none' ? '' : val});
+                }}
+              >
+                <SelectTrigger id="jobTitle">
+                  <SelectValue placeholder="Select designation" />
+                </SelectTrigger>
+                <SelectContent>
+                  {formData.jobTitle && !newDesignation && <SelectItem value="__none"><span style={{ color: '#94a3b8' }}>None</span></SelectItem>}
+                  {designationOptions.map(d => <SelectItem key={d} value={d}>{d}</SelectItem>)}
+                  <SelectItem value="__new"><span style={{ color: '#1d4ed8', fontWeight: 600 }}>+ Add new designation…</span></SelectItem>
+                </SelectContent>
+              </Select>
+              {newDesignation && (
+                <Input
+                  autoFocus
+                  value={formData.jobTitle || ''}
+                  onChange={e => setFormData({...formData, jobTitle: e.target.value})}
+                  placeholder="Type the new designation, e.g. Senior Associate"
+                />
+              )}
             </div>
             <div className="space-y-2">
               <Label htmlFor="position">Position</Label>
               <Select
-                value={formData.designation || ''}
+                value={positionOf(formData)}
                 onValueChange={(val) => setFormData({...formData, designation: val})}
               >
                 <SelectTrigger id="position">
@@ -734,7 +786,7 @@ export const Employees: React.FC = () => {
               <div className="px-6 py-5 grid grid-cols-2 gap-x-6 gap-y-4">
                 {[
                   { label: 'Designation', value: viewingEmployee.jobTitle || '—' },
-                  { label: 'Position', value: viewingEmployee.designation || '—' },
+                  { label: 'Position', value: positionOf(viewingEmployee) },
                   { label: 'Gender', value: viewingEmployee.gender || 'Not set' },
                   { label: 'Date of Birth', value: new Date(viewingEmployee.dob).toLocaleDateString() },
                   { label: 'Joining Date', value: viewingEmployee.joiningDate ? new Date(viewingEmployee.joiningDate).toLocaleDateString() : '—' },

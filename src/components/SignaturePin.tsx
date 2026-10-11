@@ -143,7 +143,7 @@ export const SetPinDialog: React.FC<{ signature: Signature; mode: 'own' | 'admin
     const title = mode === 'admin' ? (current ? 'Reset signature PIN' : 'Set signature PIN') : (current ? 'Change my signature PIN' : 'Set my signature PIN');
     return (
       <Shell titleId="sig-pin-title" title={title} icon={<KeyRound style={{ width: 20, height: 20 }} />} onClose={onClose} onSubmit={submit}
-        subtitle={<><b style={{ color: C.ink }}>{signature.name}</b> — a 4-digit PIN is needed whenever this signature is used to sign as HR.</>}>
+        subtitle={<><b style={{ color: C.ink }}>{signature.name}</b> — a 4-digit PIN is needed whenever this signature is used to sign (Confirm By HR or approval).</>}>
         {needsOld && <PinField id="sig-pin-old" label="Current PIN" value={oldPin} onChange={v => { setOldPin(v); setError(''); }} autoFocus />}
         <PinField id="sig-pin-new" label="New PIN (4 digits)" value={pin1} onChange={v => { setPin1(v); setError(''); }} autoFocus={!needsOld} />
         <PinField id="sig-pin-confirm" label="Confirm new PIN" value={pin2} onChange={v => { setPin2(v); setError(''); }} error={!!pin2 && pin1 !== pin2} />
@@ -164,14 +164,29 @@ const PURPOSE = {
   approve: { title: 'Sign to approve', label: 'Approval signature', action: 'Sign & approve', lead: (subject: string) => <>Approve the leave for <b style={{ color: C.ink }}>{subject}</b>. It is only approved once signed — choose your signature and enter its PIN.</> },
 };
 
-const SignDialog: React.FC<{ signatures: Signature[]; user: User; subject: string; purpose: SignPurpose; onDone: (s: Signature | null) => void }> = ({ signatures, user, subject, purpose, onDone }) => {
+/** For HR signing: 'hr' when the signature's role is HR, 'admin' when its role says Admin or its employee has an
+ *  Admin/HR (or Superadmin) account, otherwise null — staff signatures can't sign as HR. */
+const hrGroupOf = (s: Signature, employees?: Employee[]): 'hr' | 'admin' | null => {
+  const role = (s.role || '').toLowerCase();
+  if (/\bhr\b/.test(role) && !/admin/.test(role)) return 'hr';
+  const emp = employees?.find(e => e.id === s.employeeId);
+  if (/admin/.test(role) || emp?.role === 'Admin/HR' || emp?.role === 'Superadmin') return 'admin';
+  return null;
+};
+
+const SignDialog: React.FC<{ signatures: Signature[]; employees?: Employee[]; user: User; subject: string; purpose: SignPurpose; onDone: (s: Signature | null) => void }> = ({ signatures, employees, user, subject, purpose, onDone }) => {
   const P = PURPOSE[purpose];
-  const own = signatures.find(s => s.employeeId && s.employeeId === user?.id);
+  // Signing as HR lists HR signatures first, then Admin ones; approving lists every signature
+  const groups = purpose === 'hr'
+    ? [{ label: 'HR', list: signatures.filter(s => hrGroupOf(s, employees) === 'hr') }, { label: 'Admin', list: signatures.filter(s => hrGroupOf(s, employees) === 'admin') }]
+    : [{ label: '', list: signatures }];
+  const allowed = groups.flatMap(g => g.list);
+  const own = allowed.find(s => s.employeeId && s.employeeId === user?.id);
   const [sigId, setSigId] = useState(own?.id || '');
   const [pin, setPin] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const sig = signatures.find(s => s.id === sigId);
+  const sig = allowed.find(s => s.id === sigId);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -196,7 +211,10 @@ const SignDialog: React.FC<{ signatures: Signature[]; user: User; subject: strin
         <select id="hr-sign-sig" value={sigId} onChange={e => { setSigId(e.target.value); setPin(''); setError(''); }}
           style={{ display: 'block', width: '100%', marginTop: 4, height: 40, borderRadius: 8, border: `1px solid ${C.line}`, padding: '0 10px', fontSize: 14, fontFamily: FONT, color: C.ink, background: '#fff', cursor: 'pointer' }}>
           <option value="">Choose a signature…</option>
-          {signatures.map(s => <option key={s.id} value={s.id}>{s.name}{s.role ? ` (${s.role})` : ''}</option>)}
+          {groups.map(g => {
+            const opts = g.list.map(s => <option key={s.id} value={s.id}>{s.name}{s.role ? ` (${s.role})` : ''}</option>);
+            return g.label ? (g.list.length > 0 && <optgroup key={g.label} label={g.label}>{opts}</optgroup>) : opts;
+          })}
         </select>
         {sig?.imageUrl && (
           <div style={{ marginTop: 8, height: 64, border: `1px solid ${C.line}`, borderRadius: 8, background: '#f9fafb', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -212,7 +230,7 @@ const SignDialog: React.FC<{ signatures: Signature[]; user: User; subject: strin
 };
 
 /** "Confirm By HR": ask for the HR signature + PIN; returns the leave fields to save, or null when cancelled. */
-export async function signAsHr(opts: { signatures: Signature[]; user: User; subject: string }): Promise<Partial<LeaveRecord> | null> {
+export async function signAsHr(opts: { signatures: Signature[]; employees?: Employee[]; user: User; subject: string }): Promise<Partial<LeaveRecord> | null> {
   const sig = await requestSignature({ ...opts, purpose: 'hr' });
   return sig ? { hardCopyCollected: true, hrSignatureId: sig.id, hrSignedAt: new Date().toISOString(), hrSignedBy: opts.user?.name } : null;
 }
@@ -225,7 +243,7 @@ export async function signToApprove(opts: { signatures: Signature[]; user: User;
 export const HR_SIGN_UNDO: Partial<LeaveRecord> = { hardCopyCollected: false, hrSignatureId: undefined, hrSignedAt: undefined, hrSignedBy: undefined };
 
 /** Ask for a signature + its PIN. Resolves the signature once the PIN checks out, or null when cancelled. */
-export function requestSignature(opts: { signatures: Signature[]; user: User; subject: string; purpose: SignPurpose }): Promise<Signature | null> {
+export function requestSignature(opts: { signatures: Signature[]; employees?: Employee[]; user: User; subject: string; purpose: SignPurpose }): Promise<Signature | null> {
   return new Promise(resolve => {
     const host = document.createElement('div');
     document.body.appendChild(host);

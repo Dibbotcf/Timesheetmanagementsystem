@@ -3,7 +3,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
 import { Toaster } from './components/ui/sonner';
 import { toast } from 'sonner';
-import { LayoutDashboard, FileText, Users, File, Calendar, Database, LogOut, Menu, X, Clock, Settings as SettingsIcon, MessageSquare, ClipboardList, CalendarDays, BookOpen } from 'lucide-react';
+import { LayoutDashboard, FileText, Users, File, Calendar, Database, LogOut, Menu, X, Clock, Settings as SettingsIcon, MessageSquare, ClipboardList, CalendarDays, BookOpen, ChevronRight } from 'lucide-react';
 import { Button } from './components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from './components/ui/sheet';
 import { io } from 'socket.io-client';
@@ -27,6 +27,7 @@ import { IssueTracker } from './pages/IssueTracker';
 import { Attendance } from './pages/Attendance';
 import { Reports } from './pages/Reports';
 import { Policy } from './pages/Policy';
+import { ProfileDialog } from './components/ProfileDialog';
 import { parseToTimeInputVal, formatDisplayTime } from './components/PrintableTimesheet';
 
 
@@ -981,6 +982,7 @@ export default function App() {
 // --- Layout Component ---
 const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { currentUser, logout, previewData, disablePreview, issues, leaves, otRecords } = useAppStore();
+  const [profileOpen, setProfileOpen] = useState(false); // "My profile" dialog from the sidebar user card
   const isAdminUser = currentUser?.role === 'Admin/HR' || currentUser?.role === 'Superadmin';
   const pendingIssueCount = isAdminUser
     ? issues.filter(i => i.status === 'Open').length
@@ -1086,15 +1088,22 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         </nav>
 
         <div className="p-4 border-t border-blue-800 bg-[#151b60]">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="h-10 w-10 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold">
+          {/* User card: click to see my profile */}
+          <button type="button" onClick={() => setProfileOpen(true)} title="View my profile"
+            className="flex items-center gap-3 mb-4 w-full text-left text-white"
+            style={{ background: 'transparent', border: 'none', borderRadius: 10, padding: 6, margin: '-6px -6px 10px', width: 'calc(100% + 12px)', cursor: 'pointer', transition: 'background .15s' }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.08)'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}>
+            <div className="h-10 w-10 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold" style={{ flexShrink: 0 }}>
               {currentUser?.name.charAt(0)}
             </div>
-            <div className="overflow-hidden">
+            <div className="overflow-hidden" style={{ flex: 1, minWidth: 0 }}>
               <p className="text-sm font-medium truncate">{currentUser?.name}</p>
               <p className="text-xs text-blue-300 truncate">{currentUser?.role}</p>
             </div>
-          </div>
+            <ChevronRight className="h-4 w-4" style={{ color: '#93c5fd', flexShrink: 0 }} />
+          </button>
+          <ProfileDialog open={profileOpen} onClose={() => setProfileOpen(false)} />
           {previewData ? (
             <Button onClick={disablePreview} variant="destructive" className="w-full justify-start gap-2">
               <X className="h-4 w-4" /> Exit Preview

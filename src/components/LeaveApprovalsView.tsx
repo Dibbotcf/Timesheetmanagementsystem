@@ -45,7 +45,7 @@ export const LeaveApprovalsView: React.FC<Props> = ({ leaves, employees, templat
   const { signatures, currentUser } = useAppStore();
   // Confirm By HR = sign as HR: pick a signature and enter its PIN
   const confirmByHr = async (l: LeaveRecord) => {
-    const patch = await signAsHr({ signatures, user: currentUser, subject: `${empOf(l.employeeId)?.name ?? 'this leave'} · ${fmtRange(l.startDate, l.endDate)}` });
+    const patch = await signAsHr({ signatures, employees, user: currentUser, subject: `${empOf(l.employeeId)?.name ?? 'this leave'} · ${fmtRange(l.startDate, l.endDate)}` });
     if (!patch) return;
     updateLeave(l.id, patch);
     toast.success(`Form received — signed by ${signatures.find(s => s.id === patch.hrSignatureId)?.name ?? 'HR'}`);
@@ -220,7 +220,7 @@ export const LeaveApprovalsView: React.FC<Props> = ({ leaves, employees, templat
                               <Avatar name={emp?.name} />
                               <div style={{ minWidth: 0 }}>
                                 <div title={emp?.name} style={{ fontWeight: 600, color: C.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{emp?.name ?? 'Unknown'}</div>
-                                <div style={{ fontSize: 12, color: C.muted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{emp?.designation || emp?.eid}</div>
+                                <div style={{ fontSize: 12, color: C.muted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{emp?.designation === 'DIC' ? 'DIC' : emp?.eid}</div>
                               </div>
                             </div>
                           </td>

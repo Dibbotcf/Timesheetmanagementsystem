@@ -1,10 +1,11 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
-import { Book, Server, ChevronRight, Database, Download, Package } from 'lucide-react';
+import { Book, Server, ChevronRight, Database, Download, Package, KeyRound } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '../App';
 import { Button } from '../components/ui/button';
 import { toast } from 'sonner@2.0.3';
+import { fetchSignaturePins, SetPinDialog, type SignaturePin } from '../components/SignaturePin';
 
 export const Settings: React.FC = () => {
   const navigate = useNavigate();
@@ -86,6 +87,14 @@ export const Settings: React.FC = () => {
 
   const isAdmin = currentUser?.role === 'Admin/HR' || currentUser?.role === 'Superadmin';
 
+  // My Signature PIN: anyone can set / change the PIN of the signature linked to their own employee record
+  const mySignature = signatures.find(s => !!s.employeeId && s.employeeId === currentUser?.id);
+  const [pins, setPins] = useState<Record<string, SignaturePin> | null>(null);
+  const [pinOpen, setPinOpen] = useState(false);
+  const loadPins = () => fetchSignaturePins().then(setPins).catch(() => setPins({}));
+  useEffect(() => { loadPins(); }, []);
+  const myPin = mySignature ? pins?.[mySignature.id] : undefined;
+
   return (
     <div className="space-y-6">
       <div>
@@ -115,6 +124,54 @@ export const Settings: React.FC = () => {
             </div>
           </CardContent>
         </Card>
+
+        {/* My Signature PIN - Visible to Everyone (own signature only) */}
+        <Card className="transition-all" style={{ borderColor: '#fde68a' }}>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-xl font-semibold" style={{ color: '#78350f' }}>
+              My Signature PIN
+            </CardTitle>
+            <KeyRound className="h-6 w-6" style={{ color: '#d97706' }} />
+          </CardHeader>
+          <CardContent>
+            <CardDescription className="mt-2 text-sm leading-relaxed">
+              Your 4-digit PIN protects your signature: it is asked whenever your signature is used to sign a leave form.
+            </CardDescription>
+            {mySignature ? (
+              <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                <div style={{ width: 120, height: 48, borderRadius: 8, border: '1px solid #e5e7eb', background: '#f9fafb', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  {mySignature.imageUrl && <img src={mySignature.imageUrl} alt="Your signature" style={{ maxWidth: 108, maxHeight: 40, objectFit: 'contain' }} />}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 600, color: '#111827' }}>{mySignature.name}</div>
+                  {pins === null ? (
+                    <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 4 }}>Checking…</div>
+                  ) : (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
+                      <span className="px-3 py-1 rounded-full whitespace-nowrap" style={{ background: myPin ? '#15803d' : '#b45309', color: '#fff', fontSize: 11.5, fontWeight: 600 }}>
+                        {myPin ? 'PIN set' : 'PIN not set'}
+                      </span>
+                      {myPin && <span style={{ fontSize: 11.5, color: '#6b7280' }}>updated {new Date(myPin.updatedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</span>}
+                    </div>
+                  )}
+                </div>
+                <Button onClick={() => setPinOpen(true)} disabled={pins === null} className="bg-blue-900 hover:bg-blue-800 gap-2">
+                  <KeyRound className="h-4 w-4" /> {myPin ? 'Change PIN' : 'Set PIN'}
+                </Button>
+              </div>
+            ) : (
+              <div style={{ marginTop: 14, padding: '10px 12px', borderRadius: 8, background: '#f9fafb', border: '1px dashed #e5e7eb', fontSize: 12.5, color: '#6b7280' }}>
+                {currentUser?.role === 'Superadmin'
+                  ? <>As Superadmin you manage every signature's PIN in <b>Employees → Signatures</b>.</>
+                  : <>No signature is linked to your account yet. Ask HR to add it in <b>Employees → Signatures</b>.</>}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+        {pinOpen && mySignature && (
+          <SetPinDialog signature={mySignature} mode="own" current={myPin} user={currentUser}
+            onClose={() => setPinOpen(false)} onSaved={loadPins} />
+        )}
 
         {/* Admin Only Cards */}
         {isAdmin && (

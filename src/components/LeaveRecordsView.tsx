@@ -3,7 +3,8 @@ import { format, parseISO } from 'date-fns';
 import { ArrowLeft, Check, AlertCircle, Download, Eye, File, FileText, Folder, Loader2, Plus, Trash2, Upload, X, Paperclip, RefreshCw } from 'lucide-react';
 import { toPng } from 'html-to-image';
 import { toast } from 'sonner';
-import type { LeaveRecord, LeaveFolder, SavedLeaveReport, Employee, LeaveAttachment, LeaveAttachmentKind } from '../App';
+import { useAppStore } from '../App';
+import type { LeaveRecord, LeaveFolder, SavedLeaveReport, Employee, LeaveAttachment, LeaveAttachmentKind, Signature } from '../App';
 import { getCasualCriterion } from '../lib/leaveCriteria';
 import { uploadLeaveFile, fetchLeaveFile, deleteLeaveFile, openLeaveFile, formatBytes } from '../utils/leaveFiles';
 import { FONT, C, STATUS_STYLE, statusOf, Pill, TypePill, Avatar, OutlineBtn, PrimaryBtn, IconBtn, card, th, td, colLine, fmtQty, Bar } from './leaveUi';
@@ -35,6 +36,23 @@ export const needsSupportingDoc = (l: LeaveRecord) => l.status !== 'Rejected' &&
 const getAttachment = (l: LeaveRecord, kind: LeaveAttachmentKind) => (l.attachments || []).find(a => a.kind === kind);
 export const isEvidenceComplete = (l: LeaveRecord) => !needsSupportingDoc(l) || !!getAttachment(l, 'supporting_doc');
 
+/** Who signed (signature image + name) and when; `pending` text when not signed yet. */
+const SignedCell: React.FC<{ sig?: Signature; name?: string; at?: string; unsigned?: string }> = ({ sig, name, at, unsigned }) => {
+  const who = sig?.name || name;
+  if (!who) return unsigned ? <span style={{ fontSize: 11.5, color: C.faint }}>{unsigned}</span> : <span style={{ color: C.faint }}>—</span>;
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }} title={`Signed by ${who}${at ? ` on ${format(new Date(at), 'd MMM yyyy, h:mm a')}` : ''}`}>
+      {sig?.imageUrl
+        ? <img src={sig.imageUrl} alt="" style={{ height: 26, width: 46, objectFit: 'contain', flexShrink: 0 }} />
+        : <span style={{ width: 22, height: 22, borderRadius: 999, background: '#16a34a', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><Check style={{ width: 12, height: 12 }} /></span>}
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 12.5, fontWeight: 600, color: C.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{who}</div>
+        {at && <div style={{ fontSize: 11, color: C.muted }}>{format(new Date(at), 'd MMM yyyy')}</div>}
+      </div>
+    </div>
+  );
+};
+
 const fmtRange = (s: string, e: string) => s === e ? format(parseISO(s), 'MMM d') : `${format(parseISO(s), 'MMM d')} — ${format(parseISO(e), 'MMM d')}`;
 
 interface FolderEntry { id: string; name: string; month: string | null; createdAt: string; persisted: boolean; }
@@ -58,6 +76,8 @@ export const LeaveRecordsView: React.FC<Props> = ({
   leaves, employees, leaveFolders, savedLeaveReports, currentUser,
   onNewFolder, onViewReport, onDeleteFolder, onDeleteReport, getItem, updateLeave, onViewLeaveForm,
 }) => {
+  const { signatures } = useAppStore();
+  const sigById = (id?: string) => (id ? signatures.find(x => x.id === id) : undefined);
   const [openMonth, setOpenMonth] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null); // `${leaveId}:${kind}` while uploading/opening
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -235,18 +255,27 @@ export const LeaveRecordsView: React.FC<Props> = ({
     const isBusy = busy === `${leave.id}:${kind}`;
     if (att) {
       return (
-        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, maxWidth: '100%' }}>
+        // File chip on the first line (shrinks with "…" to the column), Replace / Delete on the second — never spills into the next column
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 4, minWidth: 0, maxWidth: '100%' }}>
           <button
             onClick={() => handleOpen(leave, att)}
             disabled={isBusy}
             title={`${att.name} · ${formatBytes(att.size)} · ${format(parseISO(att.uploadedAt), 'd MMM yyyy')}${att.uploadedBy ? ` · ${att.uploadedBy}` : ''} — click to open`}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: STATUS_STYLE.approved.bg, color: STATUS_STYLE.approved.fg, border: `1px solid ${STATUS_STYLE.approved.bd}`, borderRadius: 8, padding: '3px 10px', fontSize: 12, fontWeight: 600, cursor: 'pointer', maxWidth: 170, fontFamily: FONT }}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: STATUS_STYLE.approved.bg, color: STATUS_STYLE.approved.fg, border: `1px solid ${STATUS_STYLE.approved.bd}`, borderRadius: 8, padding: '3px 10px', fontSize: 12, fontWeight: 600, cursor: 'pointer', maxWidth: '100%', minWidth: 0, fontFamily: FONT }}
           >
-            {isBusy ? <Loader2 style={{ width: 13, height: 13 }} className="animate-spin" /> : att.mime === 'application/pdf' ? <FileText style={{ width: 13, height: 13 }} /> : <Paperclip style={{ width: 13, height: 13 }} />}
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{att.name}</span>
+            {isBusy ? <Loader2 style={{ width: 13, height: 13, flexShrink: 0 }} className="animate-spin" /> : att.mime === 'application/pdf' ? <FileText style={{ width: 13, height: 13, flexShrink: 0 }} /> : <Paperclip style={{ width: 13, height: 13, flexShrink: 0 }} />}
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{att.name}</span>
           </button>
-          <IconBtn onClick={() => pickFile(leave, kind)} title="Replace"><RefreshCw style={{ width: 13, height: 13 }} /></IconBtn>
-          <IconBtn onClick={() => handleDelete(leave, att)} title="Delete" color="#b91c1c"><X style={{ width: 14, height: 14 }} /></IconBtn>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingLeft: 2 }}>
+            <button type="button" onClick={() => pickFile(leave, kind)} disabled={isBusy} title="Replace with another file"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 3, border: 'none', background: 'transparent', padding: 0, fontSize: 11.5, fontWeight: 600, color: C.muted, cursor: 'pointer', fontFamily: FONT }}>
+              <RefreshCw style={{ width: 11, height: 11 }} /> Replace
+            </button>
+            <button type="button" onClick={() => handleDelete(leave, att)} disabled={isBusy} title="Delete this file"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 3, border: 'none', background: 'transparent', padding: 0, fontSize: 11.5, fontWeight: 600, color: '#b91c1c', cursor: 'pointer', fontFamily: FONT }}>
+              <X style={{ width: 12, height: 12 }} /> Delete
+            </button>
+          </div>
         </div>
       );
     }
@@ -325,9 +354,9 @@ export const LeaveRecordsView: React.FC<Props> = ({
             </div>
           ) : (
             <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed', minWidth: 780 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed', minWidth: 1060 }}>
                 <colgroup>
-                  <col style={{ width: 40 }} /><col style={{ width: 186 }} /><col style={{ width: 138 }} /><col style={{ width: 118 }} /><col style={{ width: 110 }} /><col /><col style={{ width: 46 }} />
+                  <col style={{ width: 40 }} /><col style={{ width: 186 }} /><col style={{ width: 138 }} /><col style={{ width: 118 }} /><col style={{ width: 110 }} /><col /><col style={{ width: 170 }} /><col style={{ width: 170 }} /><col style={{ width: 46 }} />
                 </colgroup>
                 <thead>
                   <tr>
@@ -346,6 +375,8 @@ export const LeaveRecordsView: React.FC<Props> = ({
                     <th style={{ ...th, ...colLine }}>Duration</th>
                     <th style={{ ...th, ...colLine }}>Status</th>
                     <th style={{ ...th, ...colLine }}>Supporting doc</th>
+                    <th style={{ ...th, ...colLine }}>HR Signed</th>
+                    <th style={{ ...th, ...colLine }}>Final Signed</th>
                     <th style={th}></th>
                   </tr>
                 </thead>
@@ -370,7 +401,7 @@ export const LeaveRecordsView: React.FC<Props> = ({
                             <Avatar name={emp?.name} />
                             <div style={{ minWidth: 0 }}>
                               <div title={emp?.name} style={{ fontWeight: 600, color: C.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{emp?.name ?? 'Unknown'}</div>
-                              <div style={{ fontSize: 12, color: C.muted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{emp?.designation || emp?.eid}</div>
+                              <div style={{ fontSize: 12, color: C.muted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{emp?.designation === 'DIC' ? 'DIC' : emp?.eid}</div>
                             </div>
                           </div>
                         </td>
@@ -384,6 +415,16 @@ export const LeaveRecordsView: React.FC<Props> = ({
                         </td>
                         <td style={{ ...td, ...colLine }}><Pill bg={st.bg} fg={st.fg} bd={st.bd} upper>{st.label}</Pill></td>
                         <td style={{ ...td, ...colLine }}>{rejected || l.type !== 'Sick' ? <span style={{ color: C.faint }}>—</span> : <EvidenceCell leave={l} kind="supporting_doc" required />}</td>
+                        {/* HR Signed: Confirm By HR (signature + PIN); Final Signed: the approval */}
+                        <td style={{ ...td, ...colLine }}>
+                          {rejected ? <span style={{ color: C.faint }}>—</span>
+                            : <SignedCell sig={sigById(l.hrSignatureId)} name={l.hrSignatureId ? undefined : (l.hardCopyCollected ? l.hrSignedBy : undefined)} at={l.hrSignedAt}
+                                unsigned={l.hardCopyCollected ? 'Received · unsigned' : undefined} />}
+                        </td>
+                        <td style={{ ...td, ...colLine }}>
+                          {l.status !== 'Approved' ? <span style={{ color: C.faint }}>—</span>
+                            : <SignedCell sig={sigById(l.approvedSignatureId)} name={l.approvedSignatureId ? undefined : l.approvedBy} at={l.approvedAt} unsigned="Approved · unsigned" />}
+                        </td>
                         <td style={{ ...td, textAlign: 'right' }}><IconBtn onClick={() => onViewLeaveForm(l)} title="View leave request form"><Eye style={{ width: 15, height: 15 }} /></IconBtn></td>
                       </tr>
                     );
